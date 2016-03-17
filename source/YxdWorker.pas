@@ -18,6 +18,10 @@
   更新记录
  --------------------------------------------------------------------
 
+ 2016.03.17 ver 1.1.7
+ --------------------------------------------------------------------
+  - 同步更新QWorker已经发现并修复的BUG, 更加稳定
+  
  2015.04.14 ver 1.1.6
  --------------------------------------------------------------------
   - TJob增加Handle属性，可以在作业中查看自己的Handle. 比如定时作业中,
@@ -169,15 +173,15 @@ const
   JOB_HANDLE_SIGNAL_MASK = $02;
   JOB_HANDLE_PLAN_MASK   = $03;
 
-  WORKER_ISBUSY = $01;          // 工作者忙碌
-  WORKER_PROCESSLONG = $02;     // 当前处理的一个长时间作业
-  WORKER_COM_INITED = $04;      // 工作者已初始化为支持COM的状态(仅限Windows)
-  WORKER_LOOKUP = $08;          // 工作者正在查找作业
-  WORKER_EXECUTING = $10;       // 工作者正在执行作业
-  WORKER_EXECUTED = $20;        // 工作者已经完成作业
-  WORKER_FIRING = $40;          // 工作者正在被解雇
-  WORKER_RUNNING = $80;         // 工作者线程已经开始运行
-  WORKER_CLEANING = $0100;      // 工作者线程正在清理作业
+  WORKER_ISBUSY = $0001;          // 工作者忙碌
+  WORKER_PROCESSLONG = $0002;     // 当前处理的一个长时间作业
+  WORKER_COM_INITED = $0004;      // 工作者已初始化为支持COM的状态(仅限Windows)
+  WORKER_LOOKUP = $0008;          // 工作者正在查找作业
+  WORKER_EXECUTING = $0010;       // 工作者正在执行作业
+  WORKER_EXECUTED = $0020;        // 工作者已经完成作业
+  WORKER_FIRING = $0040;          // 工作者正在被解雇
+  WORKER_RUNNING = $0080;         // 工作者线程已经开始运行
+  WORKER_CLEANING = $0100;        // 工作者线程正在清理作业
 
 const
   WAITJOB_TIMEOUT = 15000;      // 工作者等待作业超时时间 (15秒)
@@ -187,6 +191,11 @@ const
   WOMinute = 60000;            // 60s/1min
   WOHour = 3600000;            // 3600s/60min/1hour
   WODay = Int64(86400000);     // 1天
+  
+{$IFNDEF UNICODE}
+type
+  TThreadId = Cardinal;
+{$ENDIF}
 
 type
   /// <summary>作业空闲原因，内部使用</summary>
@@ -297,6 +306,7 @@ type
     procedure SetValue(Index: Integer; const Value: Boolean); inline;
     function GetIsTerminated: Boolean; inline;
     procedure SetIsTerminated(const Value: Boolean); inline;
+    procedure SetFreeType(const Value: TJobDataFreeType); inline;
     procedure AfterRun(AUsedTime: Int64);
     procedure UpdateNextTime;
     function GetFreeType: TJobDataFreeType; inline;
@@ -321,7 +331,7 @@ type
     /// <summmary>本次已运行时间，单位为1ms</summary>
     property ElapseTime: Int64 read GetElapseTime;
     /// <summary>释放类型</summary>
-    property FreeType: TJobDataFreeType read GetFreeType;
+    property FreeType: TJobDataFreeType read GetFreeType write SetFreeType;
 
     /// <summary>是否只运行一次，投递作业时自动设置</summary>
     property Runonce: Boolean index JOB_RUN_ONCE read GetValue;
@@ -476,6 +486,7 @@ type
     FEvent: TEvent;
     FFlags: Integer;
     FTimeout: Integer;
+    FFireDelay: Integer;
     FTerminatingJob: PJob;
     FPending: Boolean; // 已经计划作业
     FProcessed: Cardinal;
@@ -483,10 +494,11 @@ type
     FStartTime: Int64;
     FLastExecTime: Int64;
     {$ENDIF}
+    FLastActiveTime: Int64;
     function GetValue(Index: Integer): Boolean; inline;
     procedure SetValue(Index: Integer; const Value: Boolean); inline;
     function GetIsIdle: Boolean; inline;
-    function WaitSignal(ATimeout: Integer): TWaitResult; inline;
+    function WaitSignal(ATimeout: Integer; AByRepeatJob: Boolean): TWaitResult; inline;
   protected
     FActiveJob: PJob;
     // 之所以不直接使用FActiveJob的相关方法，是因为保证外部可以线程安全的访问这两个成员
@@ -860,11 +872,14 @@ type
     FByOrder: Boolean;
     FWaitResult: TWaitResult;
     FAfterDone: TNotifyEvent; // 作业完成事件通知
-    FTimeoutCheck: Boolean; // 是否检查作业超时
+    FTimeoutCheck: Boolean;   // 是否检查作业超时
     FTag: Pointer;
     function GetCount: Integer;
   protected
     FItems: TJobItemList;     // 作业列表
+    FRuns: Integer;           // 已经运行的数量
+    FPosted: Integer;         // 已经提交执行的数量
+    FCanceled: Integer;       // 已经取消的作业数量
     FPrepareCount: Integer;   // 准备计数
     procedure DoJobExecuted(AJob: PJob);
     procedure DoJobsTimeout(AJob: PJob);
@@ -892,6 +907,8 @@ type
     property AfterDone: TNotifyEvent read FAfterDone write FAfterDone;
     // 是否是按顺序执行(即必需等待上一个作业完成后才执行下一个)
     property ByOrder: Boolean read FByOrder;
+    // 已执行完成的作业数量
+    property Runs: Integer read FRuns;
     property Tag: Pointer read FTag write FTag;
   end;
 
@@ -980,7 +997,7 @@ procedure SetThreadCPU(AHandle: THandle; ACpuNo: Integer); inline;
 // 为与D2007兼容, 原子操作函数
 function AtomicCmpExchange(var Target: Integer; Value, Comparand: Integer): Integer; inline;
 function AtomicExchange(var Target: Integer; Value: Integer): Integer; inline;
-function AtomicIncrement(var Target: Integer): Integer; inline;
+function AtomicIncrement(var Target: Integer; const Value: Integer): Integer; inline;
 function AtomicDecrement(var Target: Integer): Integer; inline;
 {$IFEND}
 {$IFDEF WORKER_SIMPLE_LOCK}
@@ -1004,6 +1021,10 @@ function NewExData(const Value: Double): TJobExtData; overload; inline;
 function NewExData(const Value: Boolean): TJobExtData; overload; inline;
 function NewExData(const Value: Byte): TJobExtData; overload; inline;
 function NewExDataAsTime(const Value: TDateTime): TJobExtData; overload; inline;
+// 消息等待，直到事件被触发
+function MsgWaitForEvent(AEvent: TEvent; ATimeout: Cardinal): TWaitResult;
+// 检测一个线程是否存在
+function ThreadExists(AThreadId: TThreadId; AProcessId: DWORD = 0): Boolean;
 
 implementation
 
@@ -1142,9 +1163,23 @@ begin
   Result := InterlockedCompareExchange(Target, Value, Comparand);
 end;
 
-function AtomicIncrement(var Target: Integer): Integer; inline;
+function AtomicIncrement(var Target: Integer; const Value: Integer): Integer; inline;
 begin
-  Result := InterlockedIncrement(Target);
+  {$IFDEF MSWINDOWS}
+  if Value = 1 then
+    Result := InterlockedIncrement(Target)
+  else if Value = -1 then
+    Result := InterlockedDecrement(Target)
+  else
+    Result := InterlockedExchangeAdd(Target, Value);
+  {$ELSE}
+  if Value = 1 then
+    Result := TInterlocked.Increment(Target)
+  else if Value = -1 then
+    Result := TInterlocked.Decrement(Target)
+  else
+    Result := TInterlocked.Add(Target, Value);
+  {$ENDIF}
 end;
 
 function AtomicDecrement(var Target: Integer): Integer; inline;
@@ -1194,6 +1229,73 @@ begin
   except end;
 end;
 
+function ThreadExists(AThreadId: TThreadId; AProcessId: DWORD): Boolean;
+  {$IFDEF MSWINDOWS}
+  function WinThreadExists: Boolean;
+  var
+    ASnapshot: THandle;
+    AEntry: TThreadEntry32;
+  begin
+    Result := False;
+    ASnapshot := CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if ASnapshot = INVALID_HANDLE_VALUE then
+      Exit;
+    try
+      AEntry.dwSize := SizeOf(TThreadEntry32);
+      if Thread32First(ASnapshot, AEntry) then begin
+        if AProcessId = 0 then
+          AProcessId := GetCurrentProcessId;
+        repeat
+          if ((AEntry.th32OwnerProcessID = AProcessId) or
+            (AProcessId = $FFFFFFFF)) and (AEntry.th32ThreadID = AThreadId) then
+          begin
+            Result := True;
+            Break;
+          end;
+        until not Thread32Next(ASnapshot, AEntry);
+      end;
+    finally
+      CloseHandle(ASnapshot);
+    end;
+  end;
+  {$ENDIF}
+  {$IFDEF POSIX}
+  // Linux的进程与其线程之间的关系存在于/proc/进程ID/task目录下，每一个为一个线程
+  function IsChildThread: Boolean;
+  var
+    sr: TSearchRec;
+    AId: Integer;
+  begin
+    Result := False;
+    if FindFirst('/proc/' + IntToStr(AProcessId) + '/task/*', faAnyFile, sr) = 0 then begin
+      try
+        repeat
+          if TryStrToInt(sr.Name, AId) then begin
+            if TThreadId(AId) = AThreadId then
+              Result := True;
+          end;
+        until FindNext(sr) <> 0;
+      finally
+        FindClose(sr);
+      end;
+    end;
+  end;
+  {$ENDIF}
+
+begin
+  {$IFDEF POSIX}
+  Result := pthread_kill(pthread_t(AThreadId), 0) = 0;
+  if Result and (AProcessId <> $FFFFFFFF) then begin
+    /// 目前未找到合适的方法得到真正的线程ID，pthread_self得到的是一个指针
+    { if AProcessId = 0 then
+      AProcessId := getpid;
+      Result :=IsChildThread; }
+  end;
+  {$ELSE}
+  Result := WinThreadExists;
+  {$ENDIF}
+end;
+
 procedure ProcessAppMessage;
 {$IFDEF MSWINDOWS}
 var
@@ -1227,8 +1329,7 @@ begin
     AHandles[0] := AEvent.Handle;
     repeat
       T := GetTickCount;
-      rc := MsgWaitForMultipleObjects(1, AHandles[0], False, ATimeout,
-        QS_ALLINPUT);
+      rc := MsgWaitForMultipleObjects(1, AHandles[0], False, ATimeout, QS_ALLINPUT);
       if rc = WAIT_OBJECT_0 + 1 then begin
         ProcessAppMessage;
         T := GetTickCount - T;
@@ -1258,10 +1359,10 @@ begin
     repeat
       // 每隔10毫秒检查一下是否有消息需要处理，有则处理，无则进入下一个等待
       T := GetTimestamp;
+      ProcessAppMessage;
       Result := AEvent.WaitFor(10);
       if Result = wrTimeout then begin
         T := (GetTimestamp - T) div 10;
-        ProcessAppMessage;
         if ATimeout > T then
           Dec(ATimeout, T)
         else
@@ -1392,9 +1493,9 @@ var
 
 begin
   {$IFDEF MSWINDOWS}
-  {$IFDEF UNICODE}
+  {$IF RTLVersion>=21}
   NameThreadForDebugging('StaticThread');
-  {$ENDIF}
+  {$IFEND >=2010}
   if Assigned(WinGetSystemTimes) then // Win2000/XP<SP2该函数未定义，不能使用
     ATimeout := 1000
   else
@@ -1402,19 +1503,22 @@ begin
   {$ELSE}
   ATimeout := 1000;
   {$ENDIF}
-  while not Terminated do begin
-    case FEvent.WaitFor(ATimeout) of
-      wrSignaled:
-        if Assigned(FOwner) and (not FOwner.Terminating) and (FOwner.IdleWorkerCount = 0) then
-          FOwner.LookupIdleWorker(False);
-      wrTimeout:
-        if Assigned(FOwner) and (not FOwner.Terminating) and (Assigned(FOwner.FSimpleJobs)) and 
-          (FOwner.FSimpleJobs.Count > 0) and (LastCpuUsage < 60) and
-          (FOwner.IdleWorkerCount = 0) then
-          FOwner.LookupIdleWorker;
+  try
+    while not Terminated do begin
+      case FEvent.WaitFor(ATimeout) of
+        wrSignaled:
+          if Assigned(FOwner) and (not FOwner.Terminating) and (FOwner.IdleWorkerCount = 0) then
+            FOwner.LookupIdleWorker(False);
+        wrTimeout:
+          if Assigned(FOwner) and (not FOwner.Terminating) and (Assigned(FOwner.FSimpleJobs)) and
+            (FOwner.FSimpleJobs.Count > 0) and (LastCpuUsage < 60) and
+            (FOwner.IdleWorkerCount = 0) then
+            FOwner.LookupIdleWorker;
+      end;
     end;
+  finally
+    FOwner.FStaticThread := nil;
   end;
-  FOwner.FStaticThread := nil;
 end;
 
 { TJob }
@@ -1439,8 +1543,10 @@ procedure TJob.Assign(const ASource: PJob);
 begin
   Self := ASource^;
   {$IFDEF UNICODE}
-  if IsAnonWorkerProc then
-     IUnknown(WorkerProc.ProcA)._AddRef;
+  if IsAnonWorkerProc then begin
+    WorkerProc.ProcA := nil;
+    IUnknown(WorkerProc.ProcA)._AddRef;
+  end;
   {$ENDIF}
   // 下面三个成员不拷贝
   Worker := nil;
@@ -1487,6 +1593,11 @@ end;
 function TJob.GetFreeType: TJobDataFreeType;
 begin
   Result := TJobDataFreeType((Flags shr 8) and $0F);
+end;
+
+procedure TJob.SetFreeType(const Value: TJobDataFreeType);
+begin
+  Flags := (Flags and (not JOB_DATA_OWNER)) or (Integer(Value) shl 8);
 end;
 
 function TJob.GetIsCustomFree: Boolean;
@@ -1553,7 +1664,9 @@ end;
 
 procedure TJob.Synchronize(AMethod: TThreadMethod);
 begin
-  if Assigned(Worker) then
+  if GetCurrentThreadId = MainThreadId then
+    AMethod
+  else
     Worker.Synchronize(AMethod);
 end;
 
@@ -1630,6 +1743,10 @@ end;
 function TJobBase.Pop: PJob;
 begin
   Result := InternalPop;
+  if Result <> nil then begin
+    Result.PopTime := GetTimestamp;
+    Result.Next := nil;
+  end;
 end;
 
 function TJobBase.Push(AJob: PJob): Boolean;
@@ -1655,18 +1772,44 @@ end;
 
 function TSimpleJobs.ClearJobs(AObject: Pointer; AProc: TJobProc;
   AData: Pointer; AMaxTimes: Integer; AHandle: TJobHandle): Integer;
+
+  function PopAll: PJob;
+  begin
+    FLocker.Enter;
+    Result := FFirst;
+    FFirst := nil;
+    FLast := nil;
+    FCount := 0;
+    FLocker.Leave;
+  end;
+
+  procedure Repush(ANewFirst: PJob);
+  var
+    ALast: PJob;
+    ACount: Integer;
+  begin
+    if ANewFirst <> nil then begin
+      ALast := ANewFirst;
+      ACount := 0;
+      while ALast.Next <> nil do begin
+        ALast := ALast.Next;
+        Inc(ACount);
+      end;
+      FLocker.Enter;
+      ALast.Next := FFirst;
+      FFirst := ANewFirst;
+      if FLast = nil then
+        FLast := ALast;
+      Inc(FCount, ACount);
+      FLocker.Leave;
+    end;
+  end;
+
 var
   AFirst, AJob, APrior, ANext: PJob;
-  ACount: Integer;
   b: Boolean;
 begin
-  FLocker.Enter;     // 先将所有的异步作业清空，以防止被弹出执行
-  AJob := FFirst;
-  ACount := FCount;
-  FFirst := nil;
-  FLast := nil;
-  FCount := 0;
-  FLocker.Leave;
+  AJob := PopAll();
 
   Result := 0;
   APrior := nil;
@@ -1678,16 +1821,16 @@ begin
     else if AHandle > 0 then
       b := TJobHandle(AJob) = AHandle
     else
-      b := SameWorkerProc(AJob.WorkerProc, AProc) and (AJob.Data = AData);
+      b := SameWorkerProc(AJob.WorkerProc, AProc) and ((AJob.Data = AData) or (AData = nil) or (AData = Pointer(-1)));
     if b then begin
       if APrior <> nil then
         APrior.Next := ANext
       else //首个
         AFirst := ANext;
+      AJob.Next := nil;
       FOwner.FreeJob(AJob);
       Dec(AMaxTimes);
       Inc(Result);
-      Dec(ACount);
       if TJobHandle(AJob) = AHandle then
         Break;
     end else begin
@@ -1697,16 +1840,8 @@ begin
     end;
     AJob := ANext;
   end;
-  if ACount > 0 then begin
-    FLocker.Enter;
-    if AFirst <> nil then 
-      AFirst.Next := FFirst;
-    FFirst := AFirst;
-    Inc(FCount, ACount);
-    if FLast = nil then
-      FLast := APrior;
-    FLocker.Leave;
-  end;
+
+  Repush(AFirst);
 end;
 
 procedure TSimpleJobs.Clear;
@@ -1760,10 +1895,6 @@ begin
     Dec(FCount);
   end;
   FLocker.Leave;
-  if Result <> nil then begin
-    Result.PopTime := GetTimestamp;
-    Result.Next := nil;
-  end;
 end;
 
 function TSimpleJobs.InternalPush(AJob: PJob): Boolean;
@@ -1861,6 +1992,7 @@ begin
             APriorJob.Next := ANextJob
           else
             ANode.Data := ANextJob;
+          AJob.Next := nil;
           FOwner.FreeJob(AJob);
           Dec(AMaxTimes);
           Inc(Result);
@@ -1953,13 +2085,13 @@ var
 begin
   Result := nil;
   if FItems.Count = 0 then Exit;
-  ATick := GetTimestamp;
   FLocker.Enter;
   try
     if FItems.Count > 0 then begin
+      ATick := GetTimestamp;
       ANode := FItems.First;
-      if PJob(ANode.Data).NextTime <= ATick then begin
-        AJob := ANode.Data;
+      AJob := ANode.Data;
+      if AJob.NextTime <= ATick then begin
         if AJob.Next <> nil then // 如果没有更多需要执行的作业，则删除结点，否则指向下一个
           ANode.Data := AJob.Next
         else begin
@@ -1975,12 +2107,12 @@ begin
           Result := AJob
         else begin
           AJob.Next := nil;  // yangyxd 2014.09.12
+          AJob.PopTime := ATick;
           Inc(AJob.NextTime, AJob.Interval);
           Result := JobPool.Pop;
           Result.Assign(AJob);
           Result.Source := AJob;
-          //if FOwner.IsAutoFreeType(AJob) then // 如果作业是自动释放的，那么下次执行时Data应该已经被释放了，所以需要置为nil
-          //  AJob.Data := nil;   // 改为最后一次作业时释放
+          Result.Next := nil;
           // 重新插入作业
           ANode := FItems.Find(AJob);
           if ANode = nil then begin
@@ -1996,10 +2128,6 @@ begin
       SetFirstFireTime(0);
   finally
     FLocker.Leave;
-  end;
-  if Result <> nil then begin
-    Result.PopTime := ATick;
-    Result.Next := nil;
   end;
 end;
 
@@ -2096,14 +2224,21 @@ begin
   {$ENDIF}
 end;
 
-function TYXDWorker.WaitSignal(ATimeout: Integer): TWaitResult;
+function TYXDWorker.WaitSignal(ATimeout: Integer; AByRepeatJob: Boolean): TWaitResult;
 var
   T: Int64;
 begin
   if ATimeout > 1 then begin
     T := GetTimestamp;
+    if ATimeout > FOwner.FFireTimeout + FFireDelay - FTimeout then
+      ATimeout := FOwner.FFireTimeout + FFireDelay - FTimeout;
     Result := FEvent.WaitFor(ATimeout);
-    Inc(FTimeout, GetTimestamp - T);
+    T := GetTimestamp - T;
+    if Result = wrTimeout then begin
+      Inc(FTimeout, T div 10);
+      if AByRepeatJob then
+        Result := wrSignaled;
+    end;
   end else
     Result := wrSignaled;
 end;
@@ -2123,17 +2258,21 @@ begin
   {$ENDIF}
   try
     SetValue(WORKER_RUNNING, true);
+    FLastActiveTime := GetTimestamp;
+    FFireDelay := Random(FOwner.FFireTimeout shr 1);
+
     while not(Terminated or FOwner.FTerminating) do begin
 
+      SetValue(WORKER_CLEANING, False);
       if FOwner.Enabled then begin
         if (FOwner.FSimpleJobs.FFirst <> nil) then begin
-          wr := WaitSignal(0)
+          wr := WaitSignal(0, False)
         end else if (FOwner.FRepeatJobs.FFirstFireTime <> 0) then begin
-          wr := WaitSignal(FOwner.FRepeatJobs.FFirstFireTime - GetTimestamp)
+          wr := WaitSignal(FOwner.FRepeatJobs.FFirstFireTime - GetTimestamp, True)
         end else
-          wr := WaitSignal(FOwner.FFireTimeout);
+          wr := WaitSignal(FOwner.FFireTimeout, False);
       end else
-        wr := WaitSignal(FOwner.FFireTimeout);
+        wr := WaitSignal(FOwner.FFireTimeout, False);
 
       if Terminated or FOwner.FTerminating then
         Break;
@@ -2141,18 +2280,21 @@ begin
       if wr = wrSignaled then begin          
         if FOwner.FTerminating then
           Break;
-          
-        SetValue(WORKER_LOOKUP or WORKER_ISBUSY, true);
-        FPending := False;
 
+
+        FPending := False;
         if (FOwner.WorkerCount - AtomicIncrement(FOwner.FBusyCount) = 0) and
           (FOwner.WorkerCount < FOwner.MaxWorkers) then
           FOwner.NewWorkerNeeded;
 
         repeat
+          SetValue(WORKER_LOOKUP, True);
           FActiveJob := FOwner.Popup;
+          SetValue(WORKER_LOOKUP, False);
           if FActiveJob <> nil then begin
+            SetValue(WORKER_ISBUSY, True);
             FTimeout := 0;
+            FLastActiveTime := FActiveJob.PopTime;
             FActiveJob.Worker := Self;
             FActiveJobProc := FActiveJob^.WorkerProc.ToJobProc();
 
@@ -2168,10 +2310,10 @@ begin
               FActiveJobGroup := nil;
             FActiveJobFlags := FActiveJob.Flags;
             if FActiveJob.StartTime = 0 then begin
-              FActiveJob.StartTime := GetTimestamp;
+              FActiveJob.StartTime := FLastActiveTime;
               FActiveJob.FirstTime := FActiveJob.StartTime;
             end else
-              FActiveJob.StartTime := GetTimestamp;
+              FActiveJob.StartTime := FLastActiveTime;
 
             try
               FFlags := (FFlags or WORKER_EXECUTING) and (not WORKER_LOOKUP);
@@ -2191,6 +2333,8 @@ begin
             end;
             
             Inc(FProcessed);
+            SetValue(WORKER_CLEANING, True);
+            FActiveJob.Worker := nil;
             if not FActiveJob.Runonce then begin
               FOwner.FRepeatJobs.AfterJobRun(FActiveJob, GetTimestamp - FActiveJob.StartTime);
               FActiveJob.Data := nil;
@@ -2201,10 +2345,10 @@ begin
                 AtomicDecrement(FOwner.FLongTimeWorkers)
               else if FActiveJob.IsGrouped then
                 FActiveJobGroup.DoJobExecuted(FActiveJob);
-              FActiveJob.Worker := nil;
             end;
-            
-            FOwner.FreeJob(FActiveJob);
+
+            if Assigned(FActiveJob) then                       
+              FOwner.FreeJob(FActiveJob);
             FActiveJobProc := nil;
             FActiveJobSource := nil;
             FActiveJobFlags := 0;
@@ -2220,10 +2364,13 @@ begin
 
         SetValue(WORKER_ISBUSY, False);
         AtomicDecrement(FOwner.FBusyCount);
-        ThreadYield;
-      end else begin
-        if (FTimeout >= FOwner.FireTimeout) then
-          FOwner.WorkerTimeout(Self);
+        //readYield;
+      end;
+      if (FTimeout >= FOwner.FireTimeout + FFireDelay) then begin
+        // 加一个随机的2秒延迟，以避免同时释放
+        FOwner.WorkerTimeout(Self);
+        if not IsFiring then
+          FTimeout := 0;
       end;
     end;
   finally
@@ -2608,42 +2755,11 @@ begin
   FreeJob(ASource);
 end;
 
-{$IFNDEF UNICODE}
-type
-  TThreadId = Cardinal;
-{$ENDIF}
 procedure TYXDWorkers.ClearWorkers();
 var
   i: Integer;
   AInMainThread: Boolean;
 
-  {$IFDEF MSWINDOWS}
-  function ThreadExists(AId: TThreadId): Boolean;
-  var
-    ASnapshot: THandle;
-    AEntry: TThreadEntry32;
-  begin
-    Result := False;
-    ASnapshot := CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if ASnapshot = INVALID_HANDLE_VALUE then
-      Exit;
-    try
-      AEntry.dwSize := SizeOf(TThreadEntry32);
-      if Thread32First(ASnapshot, AEntry) then begin
-        repeat
-          if AEntry.th32ThreadID = AId then begin
-            Result := true;
-            Break;
-          end;
-        until not Thread32Next(ASnapshot, AEntry);
-      end;
-    finally
-      CloseHandle(ASnapshot);
-    end;
-  end;
-  {$ENDIF}
-
-  {$IFDEF MSWINDOWS}
   function WorkerExists: Boolean;
   var
     J: Integer;
@@ -2663,7 +2779,7 @@ var
       FLocker.Leave;
     end;
   end;
-  {$ENDIF}
+
 var
   T: Int64;
 begin
@@ -2678,10 +2794,10 @@ begin
   end;
   AInMainThread := GetCurrentThreadId = MainThreadId;
   T := GetTimestamp;
-  while (FWorkerCount > 0) {$IFDEF MSWINDOWS} and WorkerExists {$ENDIF} do begin
+  while (FWorkerCount > 0) and WorkerExists do begin
     if AInMainThread then
       ProcessAppMessage;
-    if GetTimestamp - T > 30000 then
+    if GetTimestamp - T > 35000 then
       Break;
     Sleep(30);
   end;
@@ -2757,6 +2873,8 @@ end;
 destructor TYXDWorkers.Destroy;
 var
   T: Int64;
+  AStaticThreadId: TThreadId;
+  AInMainThread: Boolean;
 begin
   ClearWorkers();
   FLocker.Enter;
@@ -2770,13 +2888,20 @@ begin
   {$IFDEF MSWINDOWS}
   DeallocateHWnd(FMainWorker);
   {$ENDIF}
-  FStaticThread.FreeOnTerminate := true;
+  AStaticThreadId := FStaticThread.ThreadId;
+  FStaticThread.FreeOnTerminate := True;
   FStaticThread.Terminate;
   TStaticThread(FStaticThread).FEvent.SetEvent;
   ThreadYield;
   T := GetTimestamp;
-  while Assigned(FStaticThread) and (GetTimestamp - T < 6000) do
+  AInMainThread := GetCurrentThreadId = MainThreadId;
+  while Assigned(FStaticThread) and (ThreadExists(AStaticThreadId)) and
+    (GetTimestamp - T < 6000) do
+  begin
+    if AInMainThread then
+      ProcessAppMessage;
     Sleep(200);
+  end;
   try
     if Assigned(FStaticThread) then
       FreeAndNil(FStaticThread);
@@ -3030,81 +3155,66 @@ end;
 function TYXDWorkers.LookupIdleWorker(AFromSimple: Boolean): Boolean;
 var
   AWorker: TYXDWorker;
-  i: Integer;
+  APasscount, APendingCount: Integer;
+
+  procedure InternalLookupWorker;
+  var I: Integer;
+  begin
+    I := 0;
+    FLocker.Enter;
+    try
+      while I < FWorkerCount do begin
+        if (FWorkers[I].IsIdle) and (FWorkers[I].IsRunning) and (not FWorkers[I].IsFiring) then
+        begin
+          if AWorker = nil then begin
+            if not FWorkers[I].FPending then begin
+              AWorker := FWorkers[I];
+              AWorker.FPending := True;
+              AWorker.FEvent.SetEvent;
+              Break;
+            end else
+              Inc(APendingCount);
+          end;
+        end;
+        Inc(I);
+      end;
+      if FWorkerCount = MaxWorkers then
+        // 如果已经到最大工作者，就不必重试了
+        APasscount := -1
+      else if (AWorker = nil) and (APendingCount = 0) then begin
+        // 未找到且没有启动中的工作者，则尝试创建新的
+        // OutputDebugString(PChar(Format('Pending %d,Passcount %d',
+        // [APendingCount, APasscount])));
+        AWorker := CreateWorker(False);
+      end;
+    finally
+      FLocker.Leave;
+    end;
+  end;
+
 begin
   Result := False;
   if (FBusyCount >= FMaxWorkers) or ((FDisableCount <> 0) or FTerminating) then
     Exit;
 
-  // 如果有正在解雇的工作者，那么等待完成
-  while FFiringWorkerCount > 0 do
-    ThreadYield;
-    
   AWorker := nil;
-  FLocker.Enter;
-  try
-    for i := 0 to FWorkerCount - 1 do begin
-      if (FWorkers[i].IsIdle) and (FWorkers[i].IsRunning) and
-        (not(FWorkers[i].IsFiring or FWorkers[i].FPending)) then
-      begin
-        AWorker := FWorkers[i];
-        AWorker.FPending := true;
-        AWorker.FEvent.SetEvent;
-        Break;
-      end;
+  APasscount := 0;
+  repeat
+    APendingCount := 0;
+    // 如果有正在解雇的工作者，那么等待完成
+    while FFiringWorkerCount > 0 do
+      ThreadYield;
+    InternalLookupWorker;
+    if (AWorker = nil) and (APendingCount > 0) then begin
+      // 如果没能分配工作者并且有未启动完成的工作者，则切换掉线程的时间片，然后再尝试检查
+      ThreadYield;
+      Inc(APasscount);
     end;
-    if (AWorker = nil) then
-      AWorker := CreateWorker(False);
-  finally
-    FLocker.Leave;
-  end;
+  until (APasscount < 0) or (AWorker <> nil);
   Result := AWorker <> nil;
   if Result then
     ThreadYield;
 end;  
-
-{
-function TYXDWorkers.LookupIdleWorker(AFromSimple: Boolean): Boolean;
-var
-  AWorker: TYXDWorker;
-  i: Integer;
-  AMoreWorkerNeeded: Boolean;
-begin
-  Result := False;
-  if (FBusyCount >= FMaxWorkers) or ((FDisableCount <> 0) or FTerminating) then
-    Exit;
-
-  // 如果有正在解雇的工作者，那么等待完成
-  while FFiringWorkerCount > 0 do
-    ThreadYield;
-    
-  AWorker := nil;
-  AMoreWorkerNeeded := False;
-  FLocker.Enter;
-  try
-    for i := 0 to FWorkerCount - 1 do begin
-      if (FWorkers[i].IsIdle) and (FWorkers[i].IsRunning) and
-        (not(FWorkers[i].IsFiring or FWorkers[i].FPending)) then
-      begin
-        FWorkers[i].FPending := true;
-        FWorkers[i].FEvent.SetEvent;
-        if AWorker = nil then begin
-          AWorker := FWorkers[i];
-          AMoreWorkerNeeded := (not AFromSimple) or (FRepeatJobs.FFirstFireTime = 0);
-        end else
-          AMoreWorkerNeeded := False;
-        if not AMoreWorkerNeeded then
-          Break;
-      end;
-    end;
-    if (AWorker = nil) or AMoreWorkerNeeded then
-      AWorker := CreateWorker(False);
-  finally
-    FLocker.Leave;
-  end;
-  Result := AWorker <> nil;
-end;
-}
 
 function TYXDWorkers.Popup: PJob;
 begin
@@ -3404,7 +3514,7 @@ begin
     FLocker.Leave;
   end;
   if AFound then
-    LookupIdleWorker
+    LookupIdleWorker(True)
   else
     FreeJobData(AData, AFreeType);
 end;
@@ -3434,7 +3544,7 @@ begin
     FLocker.Leave;
   end;
   if AFound then
-    LookupIdleWorker
+    LookupIdleWorker(True)
   else
     FreeJobData(AData, AFreeType);
 end;
@@ -3577,7 +3687,9 @@ var
     try
       for i := 0 to FWorkerCount - 1 do begin
         if FWorkers[i].IsLookuping then begin// 还未就绪，所以在下次查询
-          Continue;
+          Result := True;
+          Break;
+          //Continue;
         end else if FWorkers[i].IsExecuting then begin
           AJob := FWorkers[i].FActiveJob;
           case AParam.WaitType of
@@ -3651,8 +3763,11 @@ begin
 end;
 
 procedure TYXDWorkers.WorkerTimeout(AWorker: TYXDWorker);
+var
+  AWorkers: Integer;
 begin
-  if FWorkerCount - AtomicIncrement(FFiringWorkerCount) < FMinWorkers then
+  AWorkers := FWorkerCount - AtomicIncrement(FFiringWorkerCount);
+  if (AWorkers < FMinWorkers) or (AWorkers = BusyWorkerCount) then // 至少保留1个空闲
     AtomicDecrement(FFiringWorkerCount)
   else begin
     AWorker.SetValue(WORKER_FIRING, true);
@@ -3742,6 +3857,8 @@ begin
         if Result then
           FItems.Add(AJob);
       end;
+      if Result then
+        AtomicIncrement(FPosted);
     end;
   finally
     FLocker.Leave;
@@ -3750,52 +3867,45 @@ end;
 
 procedure TJobGroup.Cancel(AWaitRunningDone: Boolean);
 var
-  i: Integer;
-  AJobs: TSimpleJobs;
-  AJob, APrior, ANext: PJob;
+  I: Integer;
+  AJob: PJob;
   AWaitParam: TWorkerWaitParam;
 begin
   FLocker.Enter;
   try
+    AtomicExchange(FCanceled, 0);
     if FByOrder then begin
-      for i := 0 to FItems.Count - 1 do begin
+      I := 0;
+      while I < FItems.Count do begin
         AJob := FItems[i];
-        if AJob.PopTime = 0 then
+        if AJob.PopTime = 0 then begin
           FOwner.FreeJob(AJob);
+          FItems.Delete(I);
+          AtomicIncrement(FCanceled);
+        end else
+          Inc(I);
       end;
     end;
     FItems.Clear;
   finally
     FLocker.Leave;
   end;
-  // 从SimpleJobs里清除关联的全部作业
-  AJobs := FOwner.FSimpleJobs;
-  AJobs.FLocker.Enter;
-  try
-    AJob := AJobs.FFirst;
-    APrior := nil;
-    while AJob <> nil do begin
-      ANext := AJob.Next;
-      if AJob.IsGrouped and (AJob.Group = Self) then begin
-        if APrior = nil then
-          AJobs.FFirst := AJob.Next
-        else
-          APrior.Next := AJob.Next;
-        AJob.Next := nil;
-        FOwner.FreeJob(AJob);
-        if AJob = AJobs.FLast then
-          AJobs.FLast := nil;
-      end else
-        APrior := AJob;
-      AJob := ANext;
+  if (FPosted <> 0) then begin
+    I := Workers.FSimpleJobs.Clear(Self, MaxInt);
+    if I > 0 then begin
+      AtomicIncrement(FPosted, -I);
+      AtomicIncrement(FCanceled, I);
     end;
-  finally
-    AJobs.FLocker.Leave;
+    if AWaitRunningDone then begin
+      AWaitParam.WaitType := 3;
+      AWaitParam.Group := Self;
+      Workers.WaitRunningDone(AWaitParam);
+    end;
   end;
-  if AWaitRunningDone then begin
-    AWaitParam.WaitType := 3;
-    AWaitParam.Group := Self;
-    FOwner.WaitRunningDone(AWaitParam);
+  if FPosted = 0 then begin
+    if FCanceled > 0 then
+      FWaitResult := wrAbandoned;
+    FEvent.SetEvent;
   end;
 end;
 
@@ -3823,7 +3933,8 @@ var
   i: Integer;
 begin
   Cancel;
-  FOwner.Clear(Self, 1);
+  if FTimeoutCheck then
+    FOwner.Clear(Self, 1);
   FLocker.Enter;
   try
     if FItems.Count > 0 then begin
@@ -3861,6 +3972,7 @@ var
   i: Integer;
   AIsDone: Boolean;
 begin
+  AtomicIncrement(FRuns);
   if FWaitResult = wrIOCompletion then begin
     AIsDone := False;
     FLocker.Enter;
@@ -3869,14 +3981,29 @@ begin
       if i <> -1 then begin
         FItems.Delete(i);
         if FItems.Count = 0 then begin
+          AIsDone := true;
           FWaitResult := wrSignaled;
           FEvent.SetEvent;
-          AIsDone := true;
         end else if ByOrder then begin
           if FOwner.Post(FItems[0]) = 0 then begin
+            AtomicDecrement(FPosted);
+            FItems.Delete(0); // 投寄失败时，Post自动释放了作业
+            AIsDone := True;
             FWaitResult := wrAbandoned;
             FEvent.SetEvent;
           end;
+        end else
+          AtomicDecrement(FPosted);
+      end else begin
+        AIsDone := (FItems.Count = 0) and (AtomicDecrement(FPosted) = 0);
+        if AIsDone then begin
+          if FCanceled = 0 then
+            FWaitResult := wrSignaled
+          else begin
+            FWaitResult := wrAbandoned;
+            AtomicExchange(FCanceled, 0);
+          end;
+          FEvent.SetEvent;
         end;
       end;
     finally
@@ -3904,6 +4031,8 @@ begin
 end;
 
 function TJobGroup.MsgWaitFor(ATimeout: Cardinal): TWaitResult;
+var
+  AEmpty: Boolean;
 begin
   Result := FWaitResult;
   if GetCurrentThreadId <> MainThreadId then
@@ -3911,7 +4040,8 @@ begin
   else begin
     FLocker.Enter;
     try
-      if FItems.Count = 0 then
+      AEmpty := FItems.Count = 0;
+      if AEmpty then
         Result := wrSignaled;
     finally
       FLocker.Leave;
@@ -3926,8 +4056,10 @@ begin
       end;
       if FTimeoutCheck then
         Workers.Clear(Self);
+      if Result = wrTimeout then
+        DoAfterDone;
+    end else if AEmpty then
       DoAfterDone;
-    end;
   end;
 end;
 
@@ -3956,7 +4088,9 @@ begin
           AJob := FItems[0];
           if (AJob.PushTime = 0) then begin
             if Workers.Post(AJob) = 0 then
-              FWaitResult := wrAbandoned;
+              FWaitResult := wrAbandoned
+            else
+              AtomicIncrement(FPosted);
           end;
         end else begin
           for i := 0 to FItems.Count - 1 do begin
@@ -3965,7 +4099,8 @@ begin
               if FOwner.Post(AJob) = 0 then begin
                 FWaitResult := wrAbandoned;
                 Break;
-              end;
+              end else
+                AtomicIncrement(FPosted);
             end;
           end;
         end;
@@ -3979,11 +4114,14 @@ begin
 end;
 
 function TJobGroup.WaitFor(ATimeout: Cardinal): TWaitResult;
+var
+  AEmpty: Boolean;
 begin
   Result := FWaitResult;
   FLocker.Enter;
   try
-    if FItems.Count = 0 then
+    AEmpty := FItems.Count = 0;
+    if AEmpty then
       Result := wrSignaled;
   finally
     FLocker.Leave;
@@ -3991,12 +4129,17 @@ begin
   if Result = wrIOCompletion then begin
     if FEvent.WaitFor(ATimeout) = wrSignaled then
       Result := FWaitResult
-    else
+    else begin
       Result := wrTimeout;
+      Cancel;
+    end;
+    if Result = wrTimeout then
+      DoAfterDone;
   end;
   if FTimeoutCheck then
     FOwner.Clear;
-  DoAfterDone;
+  if AEmpty then
+    DoAfterDone;
 end;
 
 { TWorkerStateItem }
@@ -4470,6 +4613,4 @@ finalization
   {$ENDIF}
 
 end.
-
-
 

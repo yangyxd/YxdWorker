@@ -592,7 +592,7 @@ function CalcBucketSize(dataSize: Cardinal): THashType;
 // 为与D2007兼容, 原子操作函数
 function AtomicCmpExchange(var Target: Integer; Value, Comparand: Integer): Integer; inline;
 function AtomicExchange(var Target: Integer; Value: Integer): Integer; inline;
-function AtomicIncrement(var Target: Integer): Integer; inline;
+function AtomicIncrement(var Target: Integer; const Value: Integer = 1): Integer; inline;
 function AtomicDecrement(var Target: Integer): Integer; inline;
 {$IFEND}
 // 原子操作函数
@@ -1862,9 +1862,23 @@ begin
   Result := InterlockedCompareExchange(Target, Value, Comparand);
 end;
 
-function AtomicIncrement(var Target: Integer): Integer; inline;
+function AtomicIncrement(var Target: Integer; const Value: Integer): Integer; inline;
 begin
-  Result := InterlockedIncrement(Target);
+  {$IFDEF MSWINDOWS}
+  if Value = 1 then
+    Result := InterlockedIncrement(Target)
+  else if Value = -1 then
+    Result := InterlockedDecrement(Target)
+  else
+    Result := InterlockedExchangeAdd(Target, Value);
+  {$ELSE}
+  if Value = 1 then
+    Result := TInterlocked.Increment(Target)
+  else if Value = -1 then
+    Result := TInterlocked.Decrement(Target)
+  else
+    Result := TInterlocked.Add(Target, Value);
+  {$ENDIF}
 end;
 
 function AtomicDecrement(var Target: Integer): Integer; inline;
@@ -2367,8 +2381,13 @@ var
   P: PHashMapLinkItem;
 begin
   P := FindLinkItem(AData, True);
-  if Assigned(FOnDelete) then
-    FOnDelete(Self, AHash, AData);
+  if Assigned(FOnDelete) then begin
+    try
+      FOnDelete(Self, AHash, AData);
+    except
+      OutputDebugString(PChar(Exception(ExceptObject).Message));
+    end;
+  end;
   if P = nil then Exit;
   if P = FFirst then begin
     FFirst := FFirst.Next;
@@ -2896,5 +2915,4 @@ begin
 end;
 
 end.
-
 
