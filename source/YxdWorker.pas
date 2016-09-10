@@ -18,6 +18,10 @@
   更新记录
  --------------------------------------------------------------------
 
+ 2016.09.06 ver 1.1.8
+ --------------------------------------------------------------------
+  - 修复使用匿名作业处理函数时出错的bug
+
  2016.03.17 ver 1.1.7
  --------------------------------------------------------------------
   - 同步更新QWorker已经发现并修复的BUG, 更加稳定
@@ -154,7 +158,7 @@ uses
   {$IFDEF POSIX}Posix.Base, Posix.Unistd, Posix.Pthread, {$ENDIF}
   {$IFDEF MSWINDOWS}Windows, Messages, TlHelp32, Activex, {$ENDIF}
   {$IFDEF Use_DebugHelper}YxdMapFile, {$ENDIF}
-  YxdHash, SysUtils, Classes, Types, SyncObjs;
+  YxdRBTree, YxdHash, SysUtils, Classes, Types, SyncObjs;
 
 const
   JOB_RUN_ONCE = $0001;         // 作业只运行一次
@@ -3286,6 +3290,7 @@ begin
   TJobProcA(AJob.WorkerProc.ProcA) := AJobProc;
   InitJob(AJob, AData, ARunInMainThread, ADelay, AInterval);
   InitJobFreeType(Self, AJob, AData, AFreeType);
+  AJob.IsAnonWorkerProc := True;
   Result := Post(AJob);
 end;
 {$ENDIF}
@@ -3348,6 +3353,7 @@ begin
   TJobProcA(AJob.WorkerProc.ProcA) := AJobProc;
   InitJob(AJob, AData, ARunInMainThread, TimeToDelay(ATime), AInterval);
   InitJobFreeType(Self, AJob, AData, AFreeType);
+  AJob.IsAnonWorkerProc := True;
   Result := Post(AJob);
 end;
 {$ENDIF}
@@ -3397,6 +3403,7 @@ begin
     TJobProcA(AJob.WorkerProc.ProcA) := AJobProc;
     InitLogJob(AJob, AData);
     InitJobFreeType(self, AJob, AData, AFreeType);
+    AJob.IsAnonWorkerProc := True;
     Result := Post(AJob);
   end else begin // 长期作业数已经达到极限
     AtomicDecrement(FLongTimeWorkers);
@@ -3468,6 +3475,7 @@ begin
     AJob := JobPool.Pop;
     TJobProcA(AJob.WorkerProc.ProcA) := AJobProc;
     InitWaitJob(AJob, ASignalId, ARunInMainThread);
+    AJob.IsAnonWorkerProc := True;
     Result := PostWaitJob(AJob, ASignalId);
   end else
     Result := 0;
