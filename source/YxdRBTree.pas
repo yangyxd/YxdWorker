@@ -269,7 +269,7 @@ end;
 
 procedure TRBNode.SetParentAndColor(AParent: PRBNode; AColor: Integer);
 begin
-  FParentColor := IntPtr(AParent) or NativeInt(AColor);
+  FParentColor := IntPtr(AParent) or IntPtr(AColor);
 end;
 
 { TRBTree }

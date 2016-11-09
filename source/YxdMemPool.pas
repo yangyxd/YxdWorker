@@ -31,12 +31,14 @@ interface
 {$IFEND}
 
 uses
-  Types, SysUtils, Classes, SyncObjs;
+  {$IFDEF MSWINDOWS}Windows, {$ENDIF}
+  SysUtils, Classes, SyncObjs;
 
 {$if CompilerVersion < 23}
 type
-   NativeUInt = Cardinal;
-   IntPtr = Cardinal;
+  NativeUInt = Cardinal;
+  NativeInt = Integer;
+  IntPtr = Cardinal;
 {$ifend}
 
 const
@@ -46,7 +48,6 @@ const
 type
   MAddrList = array of Pointer;
   PMAddrList = ^MAddrList;
-  Number = Cardinal;
 
 type
   TMemPoolNotify = procedure(Sender: TObject; const AData: Pointer) of object;
@@ -139,20 +140,31 @@ type
     Buckets: array of PMemPoolHashItem;
     FBucketsSize: Cardinal;
     FBucketsPool: TMemPool;
+
+    FPool_4: TMemPool;
     FPool_8: TMemPool;
     FPool_12: TMemPool;
     FPool_16: TMemPool;
+    FPool_24: TMemPool;
     FPool_32: TMemPool;
+    FPool_48: TMemPool;
     FPool_64: TMemPool;
     FPool_96: TMemPool;
     FPool_128: TMemPool;
     FPool_256: TMemPool;
+    FPool_320: TMemPool;
     FPool_512: TMemPool;
+    FPool_640: TMemPool;
+    FPool_768: TMemPool;
     FPool_1024: TMemPool;
+    FPool_1280: TMemPool;
     FPool_2048: TMemPool;
     FPool_4096: TMemPool;
+    FPool_5120: TMemPool;
     FPool_8192: TMemPool;
+    
     FPoolList: array of TMemPool;
+    FPoolListSize: Cardinal;
   protected
     function GetMinMemPool(const ASize: Cardinal): TMemPool;
     function GetMemPool(const ASize: Cardinal): TMemPool;
@@ -449,18 +461,26 @@ end;
 
 procedure TAutoMemPool.Clear;
 begin
+  FPool_4.Clear;
   FPool_8.Clear;
   FPool_12.Clear;
   FPool_16.Clear;
+  FPool_24.Clear;
   FPool_32.Clear;
+  FPool_48.Clear;
   FPool_64.Clear;
   FPool_96.Clear;
   FPool_128.Clear;
   FPool_256.Clear;
+  FPool_320.Clear;
   FPool_512.Clear;
+  FPool_640.Clear;
+  FPool_768.Clear;
   FPool_1024.Clear;
+  FPool_1280.Clear;
   FPool_2048.Clear;
   FPool_4096.Clear;
+  FPool_5120.Clear;
   FPool_8192.Clear;
   ClearBuckets(); 
 end;
@@ -487,22 +507,33 @@ var
   I: Integer;
 begin
   FBucketsPool := TMemPool.Create(SizeOf(TMemPoolHashItem), 8192);
-  FPool_8 := TMemPool.Create(8, 1024);
+  FPool_4 := TMemPool.Create(4, 2048);
+  FPool_8 := TMemPool.Create(8, 2048);
   FPool_12 := TMemPool.Create(12, 1024);
   FPool_16 := TMemPool.Create(16, 1024);
+  FPool_24 := TMemPool.Create(24, 1024);
   FPool_32 := TMemPool.Create(32, 1024);
+  FPool_48 := TMemPool.Create(48, 1024);
   FPool_64 := TMemPool.Create(64, 1024);
   FPool_96 := TMemPool.Create(96, 1024);
   FPool_128 := TMemPool.Create(128, 1024);
   FPool_256 := TMemPool.Create(256, 1024);
+  FPool_320 := TMemPool.Create(320, 1024);
   FPool_512 := TMemPool.Create(512, 1024);
+  FPool_640 := TMemPool.Create(640, 1024);
+  FPool_768 := TMemPool.Create(768, 1024);
   FPool_1024 := TMemPool.Create(1024, 512);
+  FPool_1280 := TMemPool.Create(1280, 512);
   FPool_2048 := TMemPool.Create(2048, 512);
   FPool_4096 := TMemPool.Create(4096, 256);
+  FPool_5120 := TMemPool.Create(5120, 128);
   FPool_8192 := TMemPool.Create(8192, 128);
-  SetLength(FPoolList, 513);
+
+  SetLength(FPoolList, 8192);
   for I := 0 to Length(FPoolList) - 1 do
-    FPoolList[I] := GetMinMemPool(I);    
+    FPoolList[I] := GetMinMemPool(I);
+  FPoolListSize := Length(FPoolList);
+  
   SetLength(Buckets, ARefBuckets);
   FBucketsSize := Length(Buckets);
 end;
@@ -510,18 +541,26 @@ end;
 destructor TAutoMemPool.Destroy;
 begin
   ClearBuckets();
+  FreeAndNil(FPool_4);
   FreeAndNil(FPool_8);
   FreeAndNil(FPool_12);
   FreeAndNil(FPool_16);
+  FreeAndNil(FPool_24);
   FreeAndNil(FPool_32);
+  FreeAndNil(FPool_48);
   FreeAndNil(FPool_64);
   FreeAndNil(FPool_96);
   FreeAndNil(FPool_128);
   FreeAndNil(FPool_256);
+  FreeAndNil(FPool_320);
   FreeAndNil(FPool_512);
+  FreeAndNil(FPool_640);
+  FreeAndNil(FPool_768);
   FreeAndNil(FPool_1024);
+  FreeAndNil(FPool_1280);
   FreeAndNil(FPool_2048);
   FreeAndNil(FPool_4096);
+  FreeAndNil(FPool_5120);
   FreeAndNil(FPool_8192);
   FreeAndNil(FBucketsPool);
   inherited;
@@ -558,31 +597,28 @@ end;
 
 function TAutoMemPool.GetMemPool(const ASize: Cardinal): TMemPool;
 begin
-  if ASize > 512 then begin
-    if ASize > 8192 then
-      Result := nil
-    else if ASize > 4096 then
-      Result := FPool_8192
-    else if ASize > 2048 then
-      Result := FPool_4096
-    else if ASize > 1024 then
-      Result := FPool_2048
-    else
-      Result := FPool_1024
-  end else
-    Result := FPoolList[ASize];
+  if ASize < FPoolListSize then
+    Result := FPoolList[ASize]
+  else
+    Result := nil;
 end;
 
 function TAutoMemPool.GetMinMemPool(const ASize: Cardinal): TMemPool;
 begin
-  if ASize <= 8 then
+  if ASize <= 4 then
+    Result := FPool_4
+  else if ASize <= 8 then
     Result := FPool_8
   else if ASize <= 12 then
     Result := FPool_12
   else if ASize <= 16 then
     Result := FPool_16
+  else if ASize <= 24 then
+    Result := FPool_24
   else if ASize <= 32 then
     Result := FPool_32
+  else if ASize <= 48 then
+    Result := FPool_48
   else if ASize <= 64 then
     Result := FPool_64
   else if ASize <= 96 then
@@ -591,21 +627,32 @@ begin
     Result := FPool_128
   else if ASize <= 256 then
     Result := FPool_256
+  else if ASize <= 320 then
+    Result := FPool_320
   else if ASize <= 512 then
     Result := FPool_512
+  else if ASize <= 640 then
+    Result := FPool_640
+  else if ASize <= 768 then
+    Result := FPool_768
   else if ASize <= 1024 then
     Result := FPool_1024
+  else if ASize <= 1280 then
+    Result := FPool_1280
+  else if ASize <= 2048 then
+    Result := FPool_2048
+  else if ASize <= 4096 then
+    Result := FPool_4096
+  else if ASize <= 5120 then
+    Result := FPool_5120
   else
-    Result := FPool_2048;
+    Result := FPool_8192;
 end;
 
 function TAutoMemPool.GetRealPopSize(const ASize: Cardinal): Cardinal;
-var
-  Pool: TMemPool;
 begin
-  Pool := GetMemPool(ASize);
-  if Pool <> nil then
-    Result := Pool.FBlockSize
+  if ASize < FPoolListSize then
+    Result := FPoolList[ASize].FBlockSize
   else
     Result := ASize;
 end;
@@ -657,7 +704,7 @@ begin
     FBufIndex:= 0;
   if FDataBuf = nil then
     FDataBuf := AllocMem(FBufSize);
-  Result := Pointer(IntPtr(FDataBuf) + NativeInt(FBufIndex));
+  Result := Pointer(IntPtr(FDataBuf) + Cardinal(FBufIndex));
   Inc(FBufIndex, ASize);
 end;
 

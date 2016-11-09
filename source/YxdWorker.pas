@@ -143,7 +143,7 @@
 unit YxdWorker;
 
 {.$DEFINE WORKER_SIMPLE_LOCK} // 是否使用原子自旋锁?
-{.$DEFINE USE_ATOMIC}         // 是否启用原子函数(不启用时，使用YxdHash单元中的相关函数)
+{$DEFINE USE_ATOMIC}          // 是否启用原子函数(不启用时，使用YxdHash单元中的相关函数)
 {$DEFINE SAVE_WORDER_TIME}    // 记录工作者开始和最近工作时间
 {$IFNDEF NEXTGEN}
 {$DEFINE Use_DebugHelper}     // 是否使用调试助手(可查看各工作者执行的作业名称)
@@ -239,7 +239,7 @@ type
   {$ENDIF}
   PJob = ^TJob;
 
-  TJobHandle = NativeInt;
+  TJobHandle = NativeUInt;
 
   // 作业处理回调函数
   TJobProc = procedure(AJob: PJob) of object;
@@ -1001,7 +1001,7 @@ procedure SetThreadCPU(AHandle: THandle; ACpuNo: Integer); inline;
 // 为与D2007兼容, 原子操作函数
 function AtomicCmpExchange(var Target: Integer; Value, Comparand: Integer): Integer; inline;
 function AtomicExchange(var Target: Integer; Value: Integer): Integer; inline;
-function AtomicIncrement(var Target: Integer; const Value: Integer): Integer; inline;
+function AtomicIncrement(var Target: Integer; const Value: Integer = 1): Integer; inline;
 function AtomicDecrement(var Target: Integer): Integer; inline;
 {$IFEND}
 {$IFDEF WORKER_SIMPLE_LOCK}

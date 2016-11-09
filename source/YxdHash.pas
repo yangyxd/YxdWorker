@@ -72,17 +72,24 @@ interface
 {.$DEFINE AUTORESIE}           // 哈希表是否自动调整桶大小
 
 uses
-  YxdMemPool,
   {$IFDEF MSWINDOWs}Windows, {$ENDIF}
+  YxdMemPool,
   SysUtils, Classes, Types, SyncObjs;
 
 type
-  Number = Cardinal;
+  {$if CompilerVersion < 23}
+  NativeUInt = Cardinal;
+  NativeInt = Integer;
+  {$ifend}
+  Number = NativeInt;
+  NumberU = NativeUInt;
+  PNumber = ^Number;
+  PNumberU = ^NumberU;
   PDWORD = ^DWORD;
 
 type
   /// 桶内元素的哈希值列表
-  THashType = Cardinal;
+  THashType = NumberU;
   PPHashList = ^PHashList;
   PHashList = ^THashList;
   THashList = packed record
@@ -148,7 +155,7 @@ type
   THashItem = record
     Next: PHashItem;
     Key: string;
-    Value: Integer;
+    Value: Number;
   end;
 
 type
@@ -160,21 +167,29 @@ type
 
   TStringHash = class
   private
-    Buckets: array of PHashItem;
     FLocker: TCriticalSection;
+    FCount: Integer;
     FOnFreeItem: TYXDStrHashItemFreeNotify;
-  protected
-    function Find(const Key: string): PPHashItem;
+    function GetBucketsCount: Integer;
+    function GetValueItem(const Key: string): Number;
+    procedure SetValueItem(const Key: string; const Value: Number);
   public
+    Buckets: array of PHashItem;
     constructor Create(Size: Cardinal = 331);
     destructor Destroy; override;
-    procedure Add(const Key: string; Value: Integer);
-    procedure AddOrUpdate(const Key: string; Value: Integer);
+    function Find(const Key: string): PPHashItem;
+    procedure Add(const Key: string; Value: Number);
+    procedure AddOrUpdate(const Key: string; Value: Number);
     procedure Clear;
+    procedure Lock;
+    procedure UnLock;
     procedure Remove(const Key: string);
-    function Modify(const Key: string; Value: Integer): Boolean;
-    function ValueOf(const Key: string): Integer;
-    function Exists(const Key: string): Boolean;  
+    function Modify(const Key: string; Value: Number): Boolean;
+    function ValueOf(const Key: string; const DefaultValue: Number = -1): Number;
+    function Exists(const Key: string): Boolean;
+    property Values[const Key: string]: Number read GetValueItem write SetValueItem;
+    property Count: Integer read FCount;
+    property BucketsCount: Integer read GetBucketsCount;
     property OnFreeItem: TYXDStrHashItemFreeNotify read FOnFreeItem write FOnFreeItem;
   end;
 
@@ -184,7 +199,7 @@ type
   TIntHashItem = record
     Next: PIntHashItem;
     Key: THashType;
-    Value: Integer;
+    Value: Number;
   end;
 
   /// <summary>删除哈希表一个元素的通知</summary>
@@ -195,21 +210,29 @@ type
 
   TIntHash = class
   private
-    Buckets: array of PIntHashItem;
+    FCount: Integer;
     FLocker: TCriticalSection;
     FOnFreeItem: TYXDIntHashItemFreeNotify;
-  protected
-    function Find(const Key: THashType): PPIntHashItem;
+    function GetBucketsCount: Integer;
+    function GetValueItem(const Key: THashType): Number;
+    procedure SetValueItem(const Key: THashType; const Value: Number);
   public
+    Buckets: array of PIntHashItem;
     constructor Create(Size: Cardinal = 331);
     destructor Destroy; override;
-    procedure Add(const Key: THashType; Value: Integer);
-    procedure AddOrUpdate(const Key: THashType; Value: Integer);
+    function Find(const Key: THashType): PPIntHashItem;
+    procedure Add(const Key: THashType; Value: Number);
+    procedure AddOrUpdate(const Key: THashType; Value: Number);
     procedure Clear;
+    procedure Lock;
+    procedure UnLock;
     function Remove(const Key: THashType): Boolean;
-    function Modify(const Key: THashType; Value: Integer): Boolean;
-    function ValueOf(const Key: THashType): Integer;
+    function Modify(const Key: THashType; Value: Number): Boolean;
+    function ValueOf(const Key: THashType; const DefaultValue: Number = -1): Number;
     function Exists(const Key: THashType): Boolean;
+    property Values[const Key: THashType]: Number read GetValueItem write SetValueItem;
+    property Count: Integer read FCount;
+    property BucketsCount: Integer read GetBucketsCount;
     property OnFreeItem: TYXDIntHashItemFreeNotify read FOnFreeItem write FOnFreeItem;
   end;
 
@@ -473,7 +496,7 @@ end;
 
 { TStringHash }
 
-procedure TStringHash.Add(const Key: string; Value: Integer);
+procedure TStringHash.Add(const Key: string; Value: Number);
 var
   Hash: Integer;
   Bucket: PHashItem;
@@ -485,10 +508,11 @@ begin
   FLocker.Enter;
   Bucket^.Next := Buckets[Hash];
   Buckets[Hash] := Bucket;
+  Inc(FCount);
   FLocker.Leave;
 end;
 
-procedure TStringHash.AddOrUpdate(const Key: string; Value: Integer);
+procedure TStringHash.AddOrUpdate(const Key: string; Value: Number);
 begin
   if not Modify(Key, Value) then
     Add(Key, Value);
@@ -511,12 +535,14 @@ begin
     end;
     Buckets[I] := nil;
   end;
+  FCount := 0;
   FLocker.Leave;
 end;
 
 constructor TStringHash.Create(Size: Cardinal);
 begin
   inherited Create;
+  FCount := 0;
   FLocker := TCriticalSection.Create;
   SetLength(Buckets, Size);
 end;
@@ -554,7 +580,22 @@ begin
   end;
 end;
 
-function TStringHash.Modify(const Key: string; Value: Integer): Boolean;
+function TStringHash.GetBucketsCount: Integer;
+begin
+  Result := Length(Buckets);
+end;
+
+function TStringHash.GetValueItem(const Key: string): Number;
+begin
+  Result := ValueOf(Key);
+end;
+
+procedure TStringHash.Lock;
+begin
+  FLocker.Enter;
+end;
+
+function TStringHash.Modify(const Key: string; Value: Number): Boolean;
 var
   P: PHashItem;
 begin
@@ -563,6 +604,8 @@ begin
   if P <> nil then
   begin
     Result := True;
+    if Assigned(FOnFreeItem) then
+      FOnFreeItem(P);
     P^.Value := Value;
   end
   else
@@ -580,6 +623,7 @@ begin
   P := Prev^;
   if P <> nil then
   begin
+    Dec(FCount);
     Prev^ := P^.Next;
     if Assigned(FOnFreeItem) then
       FOnFreeItem(P);
@@ -588,7 +632,17 @@ begin
   FLocker.Leave;
 end;
 
-function TStringHash.ValueOf(const Key: string): Integer;
+procedure TStringHash.SetValueItem(const Key: string; const Value: Number);
+begin
+  AddOrUpdate(Key, Value);
+end;
+
+procedure TStringHash.UnLock;
+begin
+  FLocker.Leave;
+end;
+
+function TStringHash.ValueOf(const Key: string; const DefaultValue: Number): Number;
 var
   P: PHashItem;
 begin
@@ -597,13 +651,13 @@ begin
   if P <> nil then
     Result := P^.Value
   else
-    Result := -1;
+    Result := DefaultValue;
   FLocker.Leave;
 end;
 
 { TIntHash }
 
-procedure TIntHash.Add(const Key: THashType; Value: Integer);
+procedure TIntHash.Add(const Key: THashType; Value: Number);
 var
   Hash: Integer;
   Bucket: PIntHashItem;
@@ -615,10 +669,11 @@ begin
   FLocker.Enter;
   Bucket^.Next := Buckets[Hash];
   Buckets[Hash] := Bucket;
+  Inc(FCount);
   FLocker.Leave;
 end;
 
-procedure TIntHash.AddOrUpdate(const Key: THashType; Value: Integer);
+procedure TIntHash.AddOrUpdate(const Key: THashType; Value: Number);
 begin
   if not Modify(Key, Value) then
     Add(Key, Value);
@@ -649,6 +704,7 @@ begin
   inherited Create;
   FLocker := TCriticalSection.Create;
   SetLength(Buckets, Size);
+  FCount := 0;
 end;
 
 destructor TIntHash.Destroy;
@@ -680,6 +736,21 @@ begin
   end;
 end;
 
+function TIntHash.GetBucketsCount: Integer;
+begin
+  Result := Length(Buckets);
+end;
+
+function TIntHash.GetValueItem(const Key: THashType): Number;
+begin
+  Result := ValueOf(Key);
+end;
+
+procedure TIntHash.Lock;
+begin
+  FLocker.Enter;
+end;
+
 function TIntHash.Modify(const Key: THashType; Value: Integer): Boolean;
 var
   P: PIntHashItem;
@@ -689,6 +760,8 @@ begin
   if P <> nil then
   begin
     Result := True;
+    if Assigned(FOnFreeItem) then
+      FOnFreeItem(P);
     P^.Value := Value;
   end
   else
@@ -706,14 +779,26 @@ begin
   Prev := Find(Key);
   P := Prev^;
   if P <> nil then begin
-    Prev^ := P^.Next;
-    Dispose(P);
     Result := True;
+    Prev^ := P^.Next;
+    if Assigned(FOnFreeItem) then
+      FOnFreeItem(P);
+    Dispose(P);
   end;
   FLocker.Leave;
 end;
 
-function TIntHash.ValueOf(const Key: THashType): Integer;
+procedure TIntHash.SetValueItem(const Key: THashType; const Value: Number);
+begin
+  AddOrUpdate(Key, Value);
+end;
+
+procedure TIntHash.UnLock;
+begin
+  FLocker.Leave;
+end;
+
+function TIntHash.ValueOf(const Key: THashType; const DefaultValue: Number): Number;
 var
   P: PIntHashItem;
 begin
@@ -722,7 +807,7 @@ begin
   if P <> nil then
     Result := P^.Value
   else
-    Result := -1;
+    Result := DefaultValue;
   FLocker.Leave;
 end;
 
@@ -738,12 +823,12 @@ end;
 
 function THashMapValue.GetNumKey: Number;
 begin
-  Result := PDWORD(@Key)^;
+  Result := PNumber(@Key)^;
 end;
 
 procedure THashMapValue.SetNumKey(const Value: Number);
 begin
-  PDWORD(@Key)^ := THashType(Value);
+  PNumber(@Key)^ := THashType(Value);
 end;
 
 { TYXDHashTable }
@@ -1072,7 +1157,7 @@ begin
   ABucket := Pointer(FListPool.Pop);
   ABucket.Hash := AIndex;
   AIndex := AIndex mod Cardinal(Length(FBuckets));
-  ABucket.Data := Pointer(DWORD(ABucket) + SizeOf(THashMapList));
+  ABucket.Data := Pointer(NativeUInt(ABucket) + SizeOf(THashMapList));
   Initialize(ABucket.Data.Key);
   if AData <> nil then   
     ABucket.Data.Value := AData^
@@ -1098,7 +1183,7 @@ begin
   ABucket := Pointer(FListPool.Pop);
   ABucket.Hash := THashType(Key);
   AIndex := THashType(Key) mod Cardinal(Length(FBuckets));
-  ABucket.Data := Pointer(DWORD(ABucket) + SizeOf(THashMapList));
+  ABucket.Data := Pointer(NativeUInt(ABucket) + SizeOf(THashMapList));
   if AData <> nil then   
     ABucket.Data.Value := AData^
   else
@@ -1124,7 +1209,7 @@ begin
   ABucket := Pointer(FListPool.Pop);
   ABucket.Hash := AIndex;
   AIndex := AIndex mod Cardinal(Length(FBuckets));
-  ABucket.Data := Pointer(DWORD(ABucket) + SizeOf(THashMapList));
+  ABucket.Data := Pointer(NativeUInt(ABucket) + SizeOf(THashMapList));
   Initialize(ABucket.Data.Key);
   ABucket.Data.Value.Data := Pointer(AData);
   ABucket.Data.Value.Size := 0;
@@ -1148,7 +1233,7 @@ begin
   ABucket := Pointer(FListPool.Pop);
   ABucket.Hash := THashType(Key);
   AIndex := THashType(Key) mod Cardinal(Length(FBuckets));
-  ABucket.Data := Pointer(DWORD(ABucket) + SizeOf(THashMapList));
+  ABucket.Data := Pointer(NativeUInt(ABucket) + SizeOf(THashMapList));
   ABucket.Data.Value.Data := Pointer(AData);
   ABucket.Data.Value.Size := 0;
   ABucket.Data.IsStrKey := False;
@@ -1495,7 +1580,7 @@ begin
   end;
 
   // 添加到Hash表中
-  AIndex := Cardinal(ABucket.Data) mod Cardinal(Length(ListBuckets));
+  AIndex := NativeUInt(ABucket.Data) mod Cardinal(Length(ListBuckets));
   AItem := ListBuckets[AIndex];
   while AItem <> nil do begin
     if AItem.Hash = THashType(ABucket.Data) then begin
@@ -1551,7 +1636,7 @@ var
   Prev: PPHashList;
   P: PHashList;
 begin
-  Prev := @ListBuckets[Cardinal(AData) mod Cardinal(Length(ListBuckets))];
+  Prev := @ListBuckets[NativeUInt(AData) mod Cardinal(Length(ListBuckets))];
   while Prev^ <> nil do begin
     if PHashMapLinkItem(Prev^.Data).Value = AData then begin
       if isDelete then begin
