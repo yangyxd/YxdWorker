@@ -467,7 +467,7 @@ begin
   Result := HashOf(PChar(Key), Length(Key){$IFDEF UNICODE} shl 1{$ENDIF});
 end;
 
-function CalcBucketSize(dataSize: Cardinal): Cardinal;
+function CalcBucketSize(dataSize: Cardinal): THashType;
 var
   i: Integer;
 begin
@@ -751,7 +751,7 @@ begin
   FLocker.Enter;
 end;
 
-function TIntHash.Modify(const Key: THashType; Value: Integer): Boolean;
+function TIntHash.Modify(const Key: THashType; Value: Number): Boolean;
 var
   P: PIntHashItem;
 begin
