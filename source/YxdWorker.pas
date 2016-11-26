@@ -633,7 +633,7 @@ type
     procedure WorkerTerminate(AWorker: TYXDWorker);
     procedure WaitRunningDone(const AParam: TWorkerWaitParam);
     procedure FireSignalJob(ASignal: PSignal; AData: Pointer; AFreeType: TJobDataFreeType);
-    procedure DoJobFree(ATable: TObject; AHash: Cardinal; AData: Pointer);
+    procedure DoJobFree(ATable: TObject; AHash: THashType; AData: Pointer);
     procedure DoCustomFreeData(AFreeType: TJobDataFreeType; var AData: Pointer);
     procedure NewWorkerNeeded;
     procedure WorkerTimeout(AWorker: TYXDWorker); inline;
@@ -2927,7 +2927,7 @@ begin
     FOnCustomFreeData(Self, AFreeType, AData);
 end;
 
-procedure TYXDWorkers.DoJobFree(ATable: TObject; AHash: Cardinal; AData: Pointer);
+procedure TYXDWorkers.DoJobFree(ATable: TObject; AHash: THashType; AData: Pointer);
 var
   ASignal: PSignal;
 begin
