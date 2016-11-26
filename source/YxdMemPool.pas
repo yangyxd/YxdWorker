@@ -704,7 +704,7 @@ begin
     FBufIndex:= 0;
   if FDataBuf = nil then
     FDataBuf := AllocMem(FBufSize);
-  Result := Pointer(IntPtr(FDataBuf) + Cardinal(FBufIndex));
+  Result := Pointer(IntPtr(FDataBuf) + NativeInt(FBufIndex));
   Inc(FBufIndex, ASize);
 end;
 

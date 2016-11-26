@@ -4227,7 +4227,7 @@ begin
       i := AtomicIncrement(FIterator);
       if i <= StopIndex then begin
         {$IFDEF UNICODE}
-        if Assigned(FWorkJob.WorkerProc.ForProcA) then
+        if FWorkJob.IsAnonWorkerProc then
           TForJobProcA(FWorkJob.WorkerProc.ForProcA)(Self, FWorkJob, i)
         else
         {$ENDIF}

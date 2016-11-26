@@ -1492,7 +1492,7 @@ procedure TYxdMapFile.LoadDefault;
                   AFile.Read(ABuffer[0], 520);
                   if PImageImportByName(@ABuffer[0]).Hint = 0 then begin
                     AName := PCharToStr(@PImageImportByName(@ABuffer[0]).Name[0], -1);
-                    AddItem(ADLL + ', ' + AName, GetProcAddress(AModule, PAnsiChar(AName)));
+                    AddItem(ADLL + ', ' + AName, GetProcAddress(AModule, PAnsiChar(AnsiString(AName))));
                     Inc(J);
                     AFile.Position := ALastPos;
                   end;
