@@ -32,7 +32,7 @@ interface
 
 uses
   {$IFDEF MSWINDOWS}Windows, {$ENDIF}
-  SysUtils, Classes, SyncObjs;
+  SysUtils, Classes, SyncObjs, Types;
 
 {$if CompilerVersion < 23}
 type
@@ -704,7 +704,7 @@ begin
     FBufIndex:= 0;
   if FDataBuf = nil then
     FDataBuf := AllocMem(FBufSize);
-  Result := Pointer(IntPtr(FDataBuf) + NativeInt(FBufIndex));
+  Result := Pointer(NativeInt(FDataBuf) + NativeInt(FBufIndex));
   Inc(FBufIndex, ASize);
 end;
 

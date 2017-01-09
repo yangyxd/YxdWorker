@@ -440,7 +440,8 @@ type
     procedure Leave; inline;
   end;
   {$ELSE}
-  TSimpleLock = TCriticalSection;
+  TSimpleLock = class(TCriticalSection)
+  end;
   {$ENDIF}
 
   TJobErrorSource = (jesExecute, jesFreeData, jesWaitDone, jesAfterDone);
