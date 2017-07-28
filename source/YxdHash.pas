@@ -67,6 +67,10 @@ unit YxdHash;
 
 interface
 
+{$IF defined(FPC) or defined(VER170) or defined(VER180) or defined(VER190) or defined(VER200) or defined(VER210)}
+  {$DEFINE USEINLINE}
+{$IFEND}
+
 {$DEFINE USE_MEMPOOL}         // 是否使用内存池
 {$DEFINE USE_ATOMIC}          // 是否启用原子操作函数
 {.$DEFINE AUTORESIE}           // 哈希表是否自动调整桶大小
@@ -92,17 +96,17 @@ type
   THashType = NumberU;
   PPHashList = ^PHashList;
   PHashList = ^THashList;
-  THashList = packed record
+  THashList = {$IFNDEF USEINLINE}object{$ELSE}packed record{$ENDIF}
     Next: PHashList;  // 下一元素
     Data: Pointer;    // 附加数据成员
     Hash: THashType;  // 当前元素哈希值，记录以便重新分配桶时不需要再次外部计算
-    procedure Reset; inline;
+    procedure Reset; {$IFDEF USEINLINE}inline;{$ENDIF}
   end;
   THashArray = array of PHashList;
 
 type
   PHashValue = ^THashValue;
-  THashValue = packed record
+  THashValue = {$IFNDEF USEINLINE}object{$ELSE}packed record{$ENDIF}
     Size: Cardinal;       // 数据大小
     Data: Pointer;        // 数据指针
     function AsString: string;
@@ -111,17 +115,17 @@ type
 
 type
   PHashMapValue = ^THashMapValue;
-  THashMapValue = packed record
+  THashMapValue = {$IFNDEF USEINLINE}object{$ELSE}packed record{$ENDIF}
     Value: THashValue;      // 数据
     IsStrKey: WordBool;     // 是否是字符串 Key
     Key: string;            // 字符串 Key
-    function GetNumKey: Number; inline;
-    procedure SetNumKey(const Value: Number); inline;
+    function GetNumKey: Number; {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure SetNumKey(const AValue: Number); {$IFDEF USEINLINE}inline;{$ENDIF}
   end;
 
 type
   PHashMapList = ^THashMapList;
-  THashMapList = packed record
+  THashMapList = {$IFNDEF USEINLINE}object{$ELSE}packed record{$ENDIF}
     Next: PHashList;      // 下一元素
     Data: PHashMapValue;  // 附加数据成员
     Hash: THashType;      // 当前元素哈希值，记录以便重新分配桶时不需要再次外部计算
@@ -129,7 +133,7 @@ type
 
 type
   PHashMapLinkItem = ^THashMapLinkItem;
-  THashMapLinkItem = packed record
+  THashMapLinkItem = {$IFNDEF USEINLINE}object{$ELSE}packed record{$ENDIF}
     Next: PHashMapLinkItem;
     Prev: PHashMapLinkItem;
     Value: PHashMapValue;
@@ -253,9 +257,9 @@ type
     FOnCompare: TYXDCompare;
     FAutoSize : Boolean; 
     procedure DoDelete(AHash: THashType; AData:Pointer); virtual;
-    function GetBuckets(AIndex: Integer): PHashList; inline;
-    function GetBucketCount: Integer; inline;
-    function Compare(Data1, Data2: Pointer; var AResult: Integer): Boolean; inline;
+    function GetBuckets(AIndex: Integer): PHashList; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetBucketCount: Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function Compare(Data1, Data2: Pointer; var AResult: Integer): Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
   public
     ///构造函数，以桶数量为参数，后期可以调用Resize调整
     constructor Create(ASize: Integer); overload; virtual;
@@ -270,8 +274,8 @@ type
     function Find(AHash: THashType): PHashList; overload;
     function Find(AData: Pointer; AHash: THashType): Pointer; overload;
     function FindFirstData(AHash: THashType): Pointer;
-    function FindFirst(AHash: THashType): PHashList; inline;
-    function FindNext(AList: PHashList): PHashList; inline;
+    function FindFirst(AHash: THashType): PHashList; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function FindNext(AList: PHashList): PHashList; {$IFDEF USEINLINE}inline;{$ENDIF}
     procedure FreeHashList(AList: PHashList);
     function Exists(AData: Pointer; AHash: THashType):Boolean;
     procedure Delete(AData: Pointer; AHash: THashType);
@@ -316,8 +320,8 @@ type
     procedure Add(const Key: string; AData: Integer); overload;
     procedure Add(const Key: Number; AData: Integer); overload;
     procedure Clear; override;
-    function Exists(const Key: string): Boolean; overload; inline;
-    function Exists(const Key: Number): Boolean; overload; inline;
+    function Exists(const Key: string): Boolean; overload; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function Exists(const Key: Number): Boolean; overload; {$IFDEF USEINLINE}inline;{$ENDIF}
     function Find(const Key: string): PHashMapValue; overload;
     function Find(const Key: Number): PHashMapValue; overload;
     function FindList(const Key: string): PPHashList; overload;
@@ -378,7 +382,7 @@ type
     FItem: PHashMapLinkItem;
   public
     constructor Create(AList: TYXDHashMapLinkTable);
-    function GetCurrent: PHashMapLinkItem; inline;
+    function GetCurrent: PHashMapLinkItem; {$IFDEF USEINLINE}inline;{$ENDIF}
     function MoveNext: Boolean;
     property Current: PHashMapLinkItem read GetCurrent;
   end;
@@ -417,7 +421,7 @@ type
 
 // HASH 函数
 function HashOf(const Key: Pointer; KeyLen: Cardinal): THashType; overload;
-function HashOf(const Key: string): THashType; inline; overload;
+function HashOf(const Key: string): THashType; {$IFDEF USEINLINE}inline;{$ENDIF} overload;
 // 根据一个参考客户值，返回适当的哈希表大小
 function CalcBucketSize(dataSize: Cardinal): THashType;
 
@@ -462,7 +466,7 @@ begin
   end;
 end;
 
-function HashOf(const Key: string): THashType; inline; overload;
+function HashOf(const Key: string): THashType; {$IFDEF USEINLINE}inline;{$ENDIF} overload;
 begin
   Result := HashOf(PChar(Key), Length(Key){$IFDEF UNICODE} shl 1{$ENDIF});
 end;
@@ -826,9 +830,9 @@ begin
   Result := PNumber(@Key)^;
 end;
 
-procedure THashMapValue.SetNumKey(const Value: Number);
+procedure THashMapValue.SetNumKey(const AValue: Number);
 begin
-  PNumber(@Key)^ := THashType(Value);
+  PNumber(@Key)^ := THashType(AValue);
 end;
 
 { TYXDHashTable }

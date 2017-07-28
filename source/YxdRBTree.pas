@@ -2,6 +2,14 @@ unit YxdRBTree;
 
 interface
 
+{$IF RTLVersion>=24}
+{$LEGACYIFEND ON}
+{$IFEND}
+
+{$IF defined(FPC) or defined(VER170) or defined(VER180) or defined(VER190) or defined(VER200) or defined(VER210)}
+  {$DEFINE USEINLINE}
+{$IFEND}
+
 uses
   YxdMemPool,
   SysUtils, Classes, SyncObjs;
@@ -16,13 +24,13 @@ type
 type
   PRBNode = ^TRBNode;
   PPRBNode = ^PRBNode;
-  TRBNode = packed record
+  TRBNode = {$IFNDEF USEINLINE}object{$ELSE}packed record{$ENDIF}
   private
     FParentColor: IntPtr;
     function GetParent: PRBNode;
     procedure SetParent(const Value: PRBNode);
-    function RedParent: PRBNode; inline;
-    procedure SetBlack; inline;
+    function RedParent: PRBNode; {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure SetBlack; {$IFDEF USEINLINE}inline;{$ENDIF}
   public
     Left: PRBNode;  // 左结点
     Right: PRBNode; // 右结点
@@ -39,15 +47,15 @@ type
     // 前一个结点
     function Prior: PRBNode;
     // 是否为空
-    function IsEmpty: Boolean; inline;
+    function IsEmpty: Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
     // 是否是黑结点
-    function IsBlack: Boolean; inline;
+    function IsBlack: Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
     // 是否为红结点
-    function IsRed: Boolean; inline;
+    function IsRed: Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
     // 最深的最左结点
     function LeftDeepest: PRBNode;
     // 设置父结点和颜色
-    procedure SetParentAndColor(AParent: PRBNode; AColor:Integer); inline;
+    procedure SetParentAndColor(AParent: PRBNode; AColor:Integer); {$IFDEF USEINLINE}inline;{$ENDIF}
     // 父结点
     property Parent: PRBNode read GetParent write SetParent;
   end;
@@ -69,7 +77,7 @@ type
   /// </summary>
   TRBTree = class
   private
-    function GetIsEmpty: Boolean; inline;
+    function GetIsEmpty: Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
   protected
     FRoot: PRBNode;
     FCount: Integer;
@@ -79,16 +87,16 @@ type
     FOnRotate: TRBRotateNotify;
     FOnCopy: TRBCopyNotify;
     FOnPropagate: TRBPropagateNotify;
-    function EraseAugmented(node: PRBNode): PRBNode; inline;
-    procedure RotateSetParents(AOld, ANew: PRBNode; color: Integer);inline;
-    procedure EraseColor(AParent: PRBNode); inline;
-    procedure ChangeChild(AOld, ANew, parent: PRBNode); inline;
-    procedure DoCopy(node1, node2: PRBNode); inline;
-    procedure DoPropagate(node1, node2: PRBNode); inline;
-    procedure InsertColor(AChild: PRBNode); inline;
-    procedure InsertNode(node: PRBNode); inline;
-    procedure DoRotate(AOld,ANew: PRBNode); inline;
-    procedure LinkNode(node,parent: PRBNode; var rb_link: PRBNode); inline;
+    function EraseAugmented(node: PRBNode): PRBNode; {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure RotateSetParents(AOld, ANew: PRBNode; color: Integer); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure EraseColor(AParent: PRBNode); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure ChangeChild(AOld, ANew, parent: PRBNode); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure DoCopy(node1, node2: PRBNode); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure DoPropagate(node1, node2: PRBNode); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure InsertColor(AChild: PRBNode); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure InsertNode(node: PRBNode); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure DoRotate(AOld,ANew: PRBNode); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure LinkNode(node,parent: PRBNode; var rb_link: PRBNode); {$IFDEF USEINLINE}inline;{$ENDIF}
   public
     /// <summary>
     /// 构造函数，传递一个大小比较函数进去，以便在插入和查找时能够正确的区分
@@ -197,7 +205,7 @@ end;
 
 function TRBNode.Next: PRBNode;
 var
-  node, parent: PRBNode;
+  node, LParent: PRBNode;
 begin
   if IsEmpty then
     Result := nil
@@ -210,13 +218,13 @@ begin
     end;
     node := @Self;
     repeat
-      Parent := node.Parent;
-      if Assigned(Parent) and (node = Parent.Right) then
-        node := Parent
+      LParent := node.Parent;
+      if Assigned(LParent) and (node = LParent.Right) then
+        node := LParent
       else
         Break;
-    until Parent = nil;
-    Result := Parent;
+    until LParent = nil;
+    Result := LParent;
   end;
 end;
 
@@ -430,9 +438,9 @@ begin
   while (true)do begin
     sibling := AParent.Right;
     if node <> sibling then begin
-      {$REGION 'node<>sibling'}
+      {.$REGION 'node<>sibling'}
       if sibling.IsRed then begin
-        {$REGION 'slbling.IsRed'}
+        {.$REGION 'slbling.IsRed'}
         AParent.Right := sibling.Left;
         tmp1 := sibling.Left;
         sibling.Left := AParent;
@@ -441,13 +449,13 @@ begin
         DoRotate(AParent, sibling);
         sibling := tmp1;
       end;
-      {$ENDREGION 'slbling.IsRed'}
+      {.$ENDREGION 'slbling.IsRed'}
       tmp1:=sibling.Right;
       if (not Assigned(tmp1)) or tmp1.IsBlack then begin
-        {$REGION 'tmp1.IsBlack'}
+        {.$REGION 'tmp1.IsBlack'}
         tmp2 := sibling.Left;
         if (not Assigned(tmp2)) or tmp2.IsBlack then begin
-          {$REGION 'tmp2.IsBlack'}
+          {.$REGION 'tmp2.IsBlack'}
           sibling.SetParentAndColor(AParent, RB_RED);
           if AParent.IsRed then
             AParent.SetBlack
@@ -458,7 +466,7 @@ begin
               Continue;
           end;
           Break;
-          {$ENDREGION 'tmp2.IsBlack'}
+          {.$ENDREGION 'tmp2.IsBlack'}
         end;
         sibling.Left := tmp2.Right;
         tmp1 := tmp2.Right;
@@ -469,7 +477,7 @@ begin
         DoRotate(sibling, tmp2);
         tmp1 := sibling;
         sibling := tmp2;
-        {$ENDREGION 'tmp1.IsBlack'}
+        {.$ENDREGION 'tmp1.IsBlack'}
       end;
       AParent.Right := sibling.Left;
       tmp2 := sibling.Left;
@@ -480,26 +488,26 @@ begin
       RotateSetParents(AParent, sibling, RB_BLACK);
       DoRotate(AParent, sibling);
       Break;
-      {$ENDREGION 'node<>sibling'}
+      {.$ENDREGION 'node<>sibling'}
     end else begin
-      {$REGION 'RootElse'}
+      {.$REGION 'RootElse'}
       sibling := AParent.Left;
       if (sibling.IsRed) then begin
-        {$REGION 'Case 1 - right rotate at AParent'}
+        {.$REGION 'Case 1 - right rotate at AParent'}
         AParent.Left := sibling.Right;
         tmp1 := sibling.Right;
         tmp1.SetParentAndColor(AParent, RB_BLACK);
         RotateSetParents(AParent, sibling, RB_RED);
         DoRotate(AParent, sibling);
         sibling := tmp1;
-        {$ENDREGION 'Case 1 - right rotate at AParent'}
+        {.$ENDREGION 'Case 1 - right rotate at AParent'}
       end;
       tmp1 := sibling.Left;
       if (tmp1=nil) or tmp1.IsBlack then begin
-        {$REGION 'tmp1.IsBlack'}
+        {.$REGION 'tmp1.IsBlack'}
         tmp2 := sibling.Right;
         if (tmp2=nil) or tmp2.IsBlack then begin
-          {$REGION 'tmp2.IsBlack'}
+          {.$REGION 'tmp2.IsBlack'}
           sibling.SetParentAndColor(AParent, RB_RED);
           if AParent.IsRed then
             AParent.SetBlack
@@ -510,7 +518,7 @@ begin
               continue;
           end;
           break;
-          {$ENDREGION 'tmp2.IsBlack'}
+          {.$ENDREGION 'tmp2.IsBlack'}
         end;
         sibling.Right := tmp2.Left;
         tmp1 := tmp2.Left;
@@ -521,7 +529,7 @@ begin
         DoRotate(sibling, tmp2);
         tmp1 := sibling;
         sibling := tmp2;
-        {$ENDREGION ''tmp1.IsBlack'}
+        {.$ENDREGION ''tmp1.IsBlack'}
       end;
       AParent.Left := sibling.Right;
       tmp2 := sibling.Right;
@@ -532,7 +540,7 @@ begin
       RotateSetParents(AParent, sibling, RB_BLACK);
       DoRotate(AParent, sibling);
       Break;
-      {$ENDREGION 'RootElse'}
+      {.$ENDREGION 'RootElse'}
     end;
   end;
 end;

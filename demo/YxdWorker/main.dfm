@@ -1,6 +1,6 @@
 object Form1: TForm1
-  Left = 0
-  Top = 0
+  Left = 398
+  Top = 327
   BorderStyle = bsDialog
   Caption = 'QWorker Demo'
   ClientHeight = 452

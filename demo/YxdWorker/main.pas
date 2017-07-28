@@ -641,7 +641,9 @@ begin
   YxdWorkers := YxdWorker.Workers;
   SetLabelValue(Self);
 
-ReportMemoryLeaksOnShutDown:=True;
+{$IFDEF USEINLINE}
+ReportMemoryLeaksOnShutDown := True;
+{$ENDIF}
 
 //注册一个信号触发函数，以便在触发时执行
 FYxdSignalId:=YxdWorkers.RegisterSignal('MySignal.Start');

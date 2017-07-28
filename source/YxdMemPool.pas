@@ -26,8 +26,12 @@ unit YxdMemPool;
 
 interface
 
+{$IF RTLVersion>=24}
+{$LEGACYIFEND ON}
+{$IFEND}
+
 {$IF defined(FPC) or defined(VER170) or defined(VER180) or defined(VER190) or defined(VER200) or defined(VER210)}
-  {$DEFINE HAVE_INLINE}
+  {$DEFINE USEINLINE}
 {$IFEND}
 
 uses
@@ -69,9 +73,9 @@ type
     FOnNew: TMemPoolNew;
     FOnReset: TMemPoolNotify;
   protected
-    procedure DoFree(const AData: Pointer); inline;
-    procedure DoReset(const AData: Pointer); inline;
-    procedure DoNew(var AData: Pointer); inline;
+    procedure DoFree(const AData: Pointer); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure DoReset(const AData: Pointer); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure DoNew(var AData: Pointer); {$IFDEF USEINLINE}inline;{$ENDIF}
   public
     constructor Create(BlockSize: Cardinal; MaxSize: Integer = 64);
     destructor Destroy; override;
@@ -103,15 +107,15 @@ type
     FOnNew: TMemPoolNew;
     FOnReset: TMemPoolNotify;
   protected
-    procedure DoFree(const AData: Pointer); inline;
-    procedure DoReset(const AData: Pointer); inline;
-    procedure DoNew(var AData: Pointer); inline;
+    procedure DoFree(const AData: Pointer); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure DoReset(const AData: Pointer); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure DoNew(var AData: Pointer); {$IFDEF USEINLINE}inline;{$ENDIF}
   public
     constructor Create(BlockSize: Cardinal; MaxSize: Integer = 64);
     destructor Destroy; override;
     procedure Clear;
-    procedure Lock; {$IFDEF HAVE_INLINE} inline;{$ENDIF}
-    procedure Unlock; {$IFDEF HAVE_INLINE} inline;{$ENDIF}
+    procedure Lock; {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure Unlock; {$IFDEF USEINLINE}inline;{$ENDIF}
     function Pop(): Pointer;
     procedure Push(const V: Pointer);
     property BlockSize: Cardinal read FBlockSize;
@@ -176,8 +180,8 @@ type
 		destructor Destroy; override;
     function Pop(const ASize: Cardinal): Pointer; virtual;
     procedure Push(const V: Pointer); virtual;
-    function GetMem(const ASize: Cardinal): Pointer; inline;
-    procedure FreeMem(var V: Pointer); inline;
+    function GetMem(const ASize: Cardinal): Pointer; {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure FreeMem(var V: Pointer); {$IFDEF USEINLINE}inline;{$ENDIF}
     procedure Clear; virtual;
     function GetRealPopSize(const ASize: Cardinal): Cardinal;
   end;
@@ -235,15 +239,15 @@ type
     FOnReset: TOnResetObject;
     FOnFree: TOnNotifyObject;
   protected
-    procedure DoFree(var Obj: TObject); inline;
+    procedure DoFree(var Obj: TObject); {$IFDEF USEINLINE}inline;{$ENDIF}
   public
     constructor Create(AMaxCount: Integer); overload;
     constructor Create(AMaxCount: Integer; ObjClass: TClass);overload;
     destructor Destroy; override;
     function GetObject: TObject;
     procedure FreeObject(Obj: TObject);
-    function Pop: TObject; inline;
-    procedure Push(Obj: TObject); inline;
+    function Pop: TObject; {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure Push(Obj: TObject); {$IFDEF USEINLINE}inline;{$ENDIF}
     property OnCreateObject: TOnNotifyObject read FOnCreate write FOnCreate;
     property OnResetObject: TOnResetObject read FOnReset write FOnReset;
     property OnFreeObject: TOnNotifyObject read FOnFree write FOnFree;

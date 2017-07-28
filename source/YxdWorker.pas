@@ -18,6 +18,10 @@
   更新记录
  --------------------------------------------------------------------
 
+ 2017.07.28 ver 1.1.9
+ --------------------------------------------------------------------
+  - 兼容 D7
+  
  2016.09.06 ver 1.1.8
  --------------------------------------------------------------------
   - 修复使用匿名作业处理函数时出错的bug
@@ -149,6 +153,10 @@ unit YxdWorker;
 {$DEFINE Use_DebugHelper}     // 是否使用调试助手(可查看各工作者执行的作业名称)
 {$ENDIF}
 {$DEFINE AutoFreeJobExData}   // 是否自动认别Job的ExData，并强制为自动释放
+
+{$IF defined(FPC) or defined(VER170) or defined(VER180) or defined(VER190) or defined(VER200) or defined(VER210)}
+  {$DEFINE USEINLINE}
+{$IFEND}
 
 interface
 
@@ -284,7 +292,6 @@ type
   end;
 
   TJobMethod = record
-  function ToJobProc: TJobProc; inline;
   case Integer of
     0:
       (Proc: {$IFNDEF NEXTGEN}TJobProc{$ELSE}Pointer{$ENDIF});
@@ -302,33 +309,80 @@ type
       (Code: Pointer; Data: Pointer);
   end;
 
-  TJob = record
+  {$IFNDEF USEINLINE}
+  TJobExData = record
+    case Integer of
+      0:
+        (
+          SignalId: Integer;  // 信号编码
+          Source: PJob;       // 源作业地址
+          RefCount: PInteger; // 源数据
+        );
+      1:
+        (
+          Interval: Int64;    // 运行时间间隔，单位为1ms，实际精度受不同操作系统限制+8B
+          FirstDelay: Int64;  // 首次运行延迟，单位为1ms，默认为0
+        );
+      2:
+        (
+          Group: Pointer;     // 分组作业支持
+        );
+  end;
+  {$ENDIF}
+
+  TJob = {$IFNDEF USEINLINE}object{$ELSE}record{$ENDIF}
   private
-    function GetAvgTime: Integer; inline;
-    function GetElapseTime: Int64; inline;
-    function GetValue(Index: Integer): Boolean; inline;
-    procedure SetValue(Index: Integer; const Value: Boolean); inline;
-    function GetIsTerminated: Boolean; inline;
-    procedure SetIsTerminated(const Value: Boolean); inline;
-    procedure SetFreeType(const Value: TJobDataFreeType); inline;
+    function GetAvgTime: Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetElapseTime: Int64; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetValue(Index: Integer): Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure SetValue(Index: Integer; const Value: Boolean); {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetIsTerminated: Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure SetIsTerminated(const Value: Boolean); {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure SetFreeType(const Value: TJobDataFreeType); {$IFDEF USEINLINE}inline;{$ENDIF}
     procedure AfterRun(AUsedTime: Int64);
     procedure UpdateNextTime;
-    function GetFreeType: TJobDataFreeType; inline;
-    function GetIsCustomFree: Boolean; inline;
-    function GetIsInterfaceOwner: Boolean; inline;
-    function GetIsObjectOwner: Boolean; inline;
-    function GetIsRecordOwner: Boolean; inline;
-    function GetExtData: TJobExtData; inline;
+    function GetFreeType: TJobDataFreeType; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetIsCustomFree: Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetIsInterfaceOwner: Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetIsObjectOwner: Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetIsRecordOwner: Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetExtData: TJobExtData; {$IFDEF USEINLINE}inline;{$ENDIF}
     function GetHandle: TJobHandle;
+
+    {$IFNDEF USEINLINE}
+    function GetFirstDelay: Int64;
+    function GetGroup: Pointer;
+    function GetInterval: Int64;
+    function GetRefCount: PInteger;
+    function GetSignalId: Integer;
+    function GetSource: PJob;
+    procedure SetFirstDelay(const Value: Int64);
+    procedure SetGroup(const Value: Pointer);
+    procedure SetInterval(const Value: Int64);
+    procedure SetRefCount(const Value: PInteger);
+    procedure SetSignalId(const Value: Integer);
+    procedure SetSource(const Value: PJob);
+    {$ENDIF}
   public
     procedure Create(AProc: TJobProc);
     /// <summary>值拷贝函数</summary>
     /// <remarks>Worker/Next/Source不会复制并会被置空，Owner不会被复制</remarks>
     procedure Assign(const ASource: PJob);
     /// <summary>重置内容，以便为从队列中弹出做准备</summary>
-    procedure Reset; inline;
+    procedure Reset; {$IFDEF USEINLINE}inline;{$ENDIF}
     /// <summary>公开下线程对象的同步方法，但更推荐投寄异步作业到主线程中处理</summary>
-    procedure Synchronize(AMethod: TThreadMethod); {$IFDEF UNICODE}inline;{$ENDIF}
+    procedure Synchronize(AMethod: TThreadMethod); {$IFDEF USEINLINE}inline;{$ENDIF}
+
+    {$IFNDEF USEINLINE}
+    property SignalId: Integer read GetSignalId write SetSignalId;
+    property Source: PJob read GetSource write SetSource;
+    property RefCount: PInteger read GetRefCount write SetRefCount;
+
+    property Interval: Int64 read GetInterval write SetInterval;
+    property FirstDelay: Int64 read GetFirstDelay write SetFirstDelay;
+
+    property Group: Pointer read GetGroup write SetGroup;
+    {$ENDIF}
 
     /// <summary>平均每次运行时间，单位为1ms</summary>
     property AvgTime: Integer read GetAvgTime;
@@ -383,6 +437,9 @@ type
     MaxUsedTime: Integer;   // 最大运行时间+4B
     Flags: Integer;         // 作业标志位+4B
     Data: Pointer;          // 附加数据内容
+    {$IFNDEF USEINLINE}
+    ExData: TJobExData;
+    {$ELSE}
     case Integer of
       0:
         (
@@ -399,6 +456,7 @@ type
         (
           Group: Pointer;     // 分组作业支持
         );
+    {$ENDIF}
   end;
 
   // 作业队列对象的基类，提供基础的接口封装
@@ -408,14 +466,14 @@ type
     function InternalPush(AJob: PJob): Boolean; virtual; abstract;
     function InternalPop: PJob; virtual; abstract;
     function GetCount: Integer; virtual; abstract;
-    function GetEmpty: Boolean; inline;
+    function GetEmpty: Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
   public
     constructor Create(AOwner: TYXDWorkers); virtual;
     destructor Destroy; override;
     // 投寄一个作业 (外部不应尝试直接投寄任务到队列，其由Workers的相应函数内部调用。)
     function Push(AJob: PJob): Boolean; 
     // 弹出一个作业
-    function Pop: PJob; inline;
+    function Pop: PJob; {$IFDEF USEINLINE}inline;{$ENDIF}
     // 空所有作业
     procedure Clear; overload; virtual;
     // 清空指定的作业
@@ -463,9 +521,9 @@ type
     procedure Start;
     function Wait(AMsgWait: Boolean): TWaitResult;
     function GetBreaked: Boolean;
-    function GetRuns: Cardinal; inline;
-    function GetTotalTime: Cardinal; inline;
-    function GetAvgTime: Cardinal; inline;
+    function GetRuns: Cardinal; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetTotalTime: Cardinal; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetAvgTime: Cardinal; {$IFDEF USEINLINE}inline;{$ENDIF}
   public
     constructor Create(const AStartIndex, AStopIndex: TForLoopIndexType;
       AData: Pointer; AFreeType: TJobDataFreeType); overload;
@@ -500,10 +558,10 @@ type
     FLastExecTime: Int64;
     {$ENDIF}
     FLastActiveTime: Int64;
-    function GetValue(Index: Integer): Boolean; inline;
-    procedure SetValue(Index: Integer; const Value: Boolean); inline;
-    function GetIsIdle: Boolean; inline;
-    function WaitSignal(ATimeout: Integer; AByRepeatJob: Boolean): TWaitResult; inline;
+    function GetValue(Index: Integer): Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
+    procedure SetValue(Index: Integer; const Value: Boolean); {$IFDEF USEINLINE}inline;{$ENDIF}
+    function GetIsIdle: Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
+    function WaitSignal(ATimeout: Integer; AByRepeatJob: Boolean): TWaitResult; {$IFDEF USEINLINE}inline;{$ENDIF}
   protected
     FActiveJob: PJob;
     // 之所以不直接使用FActiveJob的相关方法，是因为保证外部可以线程安全的访问这两个成员
@@ -546,10 +604,10 @@ type
   TCustomFreeDataEvent = procedure(ASender: TYXDWorkers; AFreeType: TJobDataFreeType; var AData: Pointer) of object;
 
   PWorkerStateItem = ^TWorkerStateItem;
-  TWorkerStateItem = packed record
+  TWorkerStateItem = {$IFNDEF USEINLINE}object{$ELSE}packed record{$ENDIF}
   private
     Flags: Integer;               // 状态标志
-    function GetValue(Index: Integer): Boolean; inline;
+    function GetValue(Index: Integer): Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
   public
     Handle: Cardinal;             // 线程句柄
     ActiveJobFlags: Integer;      // 正在执行的作业标志位
@@ -637,7 +695,7 @@ type
     procedure DoJobFree(ATable: TObject; AHash: THashType; AData: Pointer);
     procedure DoCustomFreeData(AFreeType: TJobDataFreeType; var AData: Pointer);
     procedure NewWorkerNeeded;
-    procedure WorkerTimeout(AWorker: TYXDWorker); inline;
+    procedure WorkerTimeout(AWorker: TYXDWorker); {$IFDEF USEINLINE}inline;{$ENDIF}
     function CreateWorker(ASuspended: Boolean): TYXDWorker;
     function IsAutoFreeType(AJob: PJob): Boolean;
   public
@@ -764,19 +822,22 @@ type
     /// <summary>
     /// 并行For运算 (注意 AWorkerProc 与普通 Post 作业不同)
     /// </summary>
+    {$IFDEF USEINLINE}
     function &For(const AStartIndex, AStopIndex: TForLoopIndexType;
       AWorkerProc: TForJobProc; AData: Pointer = nil; AMsgWait: Boolean = False;
       AFreeType: TJobDataFreeType = jdfFreeByUser): TWaitResult; overload;
+    {$ENDIF}
     {$IFDEF UNICODE}
     function &For(const AStartIndex, AStopIndex: TForLoopIndexType;
       AWorkerProc: TForJobProcA; AData: Pointer = nil; AMsgWait: Boolean = False;
       AFreeType: TJobDataFreeType = jdfFreeByUser): TWaitResult; overload;
     {$ENDIF}
+    {$IFDEF USEINLINE}
     function &For(const AStartIndex, AStopIndex: TForLoopIndexType;
       AWorkerProc: TForJobProcG; AData: Pointer = nil; AMsgWait: Boolean = False;
       AFreeType: TJobDataFreeType = jdfFreeByUser): TWaitResult; overload;
+    {$ENDIF}
 
-    
 
     // 最大允许工作者数量，不能小于2
     property MaxWorkers: Integer read FMaxWorkers write SetMaxWorkers;
@@ -840,7 +901,7 @@ type
   private
     FLocker: TCriticalSection;
     FFirstFireTime: Int64;
-    procedure SetFirstFireTime(Value: Int64); inline;
+    procedure SetFirstFireTime(Value: Int64); {$IFDEF USEINLINE}inline;{$ENDIF}
     function ClearJobs(AObject: Pointer; AProc: TJobProc; AData: Pointer;
       AMaxTimes: Integer; AHandle: TJobHandle = 0): Integer;
     procedure AfterJobRun(AJob: PJob; AUsedTime: Int64);
@@ -994,38 +1055,40 @@ function GetTimestamp: Int64;
 // 获取CPU数量
 function GetCPUCount: Integer;
 // 将全局的作业处理函数转换为TJobProc类型，以便正常调度使用
-function MakeJobProc(const AProc: TJobProcG): TJobProc; inline;
+function MakeJobProc(const AProc: TJobProcG): TJobProc; {$IFDEF USEINLINE}inline;{$ENDIF}
 // 设置线程运行的CPU
-procedure SetThreadCPU(AHandle: THandle; ACpuNo: Integer); inline;
+procedure SetThreadCPU(AHandle: THandle; ACpuNo: Integer); {$IFDEF USEINLINE}inline;{$ENDIF}
 {$IFDEF USE_ATOMIC}
 {$IF RTLVersion<26}
 // 为与D2007兼容, 原子操作函数
-function AtomicCmpExchange(var Target: Integer; Value, Comparand: Integer): Integer; inline;
-function AtomicExchange(var Target: Integer; Value: Integer): Integer; inline;
-function AtomicIncrement(var Target: Integer; const Value: Integer = 1): Integer; inline;
-function AtomicDecrement(var Target: Integer): Integer; inline;
+function AtomicCmpExchange(var Target: Integer; Value, Comparand: Integer): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
+function AtomicExchange(var Target: Integer; Value: Integer): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
+function AtomicIncrement(var Target: Integer; const Value: Integer = 1): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
+function AtomicDecrement(var Target: Integer): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
 {$IFEND}
 {$IFDEF WORKER_SIMPLE_LOCK}
 // 原子操作函数
-function AtomicAnd(var Dest: Integer; const AMask: Integer): Integer; inline;
-function AtomicOr(var Dest: Integer; const AMask: Integer): Integer; inline;
+function AtomicAnd(var Dest: Integer; const AMask: Integer): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
+function AtomicOr(var Dest: Integer; const AMask: Integer): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
 {$ENDIF}
 {$ENDIF}
 
+function ToJobProc(const AMethod: TJobMethod): TJobProc; {$IFDEF USEINLINE}inline;{$ENDIF}
+
 // 创建一个扩展数据作为作业的参数
-function NewExData(const Value: string): TJobExtData; overload; inline;
+function NewExData(const Value: string): TJobExtData; overload; {$IFDEF USEINLINE}inline;{$ENDIF}
 {$IFNDEF UNICODE}
-function NewExData(const Value: WideString): TJobExtData; overload; inline;
+function NewExData(const Value: WideString): TJobExtData; overload; {$IFDEF USEINLINE}inline;{$ENDIF}
 {$ENDIF}
 {$IFNDEF NEXTGEN}{$IFDEF UNICODE}
-function NewExData(const Value: AnsiString): TJobExtData; overload; inline;
+function NewExData(const Value: AnsiString): TJobExtData; overload; {$IFDEF USEINLINE}inline;{$ENDIF}
 {$ENDIF}{$ENDIF}
-function NewExData(const Value: Int64): TJobExtData; overload; inline;
-function NewExData(const Value: Cardinal): TJobExtData; overload; inline;
-function NewExData(const Value: Double): TJobExtData; overload; inline;
-function NewExData(const Value: Boolean): TJobExtData; overload; inline;
-function NewExData(const Value: Byte): TJobExtData; overload; inline;
-function NewExDataAsTime(const Value: TDateTime): TJobExtData; overload; inline;
+function NewExData(const Value: Int64): TJobExtData; overload; {$IFDEF USEINLINE}inline;{$ENDIF}
+function NewExData(const Value: Cardinal): TJobExtData; overload; {$IFDEF USEINLINE}inline;{$ENDIF}
+function NewExData(const Value: Double): TJobExtData; overload; {$IFDEF USEINLINE}inline;{$ENDIF}
+function NewExData(const Value: Boolean): TJobExtData; overload; {$IFDEF USEINLINE}inline;{$ENDIF}
+function NewExData(const Value: Byte): TJobExtData; overload; {$IFDEF USEINLINE}inline;{$ENDIF}
+function NewExDataAsTime(const Value: TDateTime): TJobExtData; overload; {$IFDEF USEINLINE}inline;{$ENDIF}
 // 消息等待，直到事件被触发
 function MsgWaitForEvent(AEvent: TEvent; ATimeout: Cardinal): TWaitResult;
 // 检测一个线程是否存在
@@ -1146,7 +1209,7 @@ begin
   TMethod(Result).Code := @AProc;
 end;
 
-function SameWorkerProc(const P1: TJobMethod; const P2: TJobProc): Boolean; inline;
+function SameWorkerProc(const P1: TJobMethod; const P2: TJobProc): Boolean; {$IFDEF USEINLINE}inline;{$ENDIF}
 begin
   Result := (P1.Code = TMethod(P2).Code) and (P1.Data = TMethod(P2).Data);
 end;
@@ -1163,12 +1226,21 @@ end;
 {$IFDEF USE_ATOMIC}
 // 兼容2007版的原子操作接口
 {$IF RTLVersion<26}
-function AtomicCmpExchange(var Target: Integer; Value: Integer; Comparand: Integer): Integer; inline;
+function AtomicCmpExchange(var Target: Integer; Value: Integer; Comparand: Integer): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
+{$IFDEF USEINLINE}
 begin
   Result := InterlockedCompareExchange(Target, Value, Comparand);
+{$ELSE}
+var
+  LTarget: Pointer absolute Target;
+  LValue: Pointer absolute Value;
+  LComparand: Pointer absolute Comparand;
+begin
+  Result := Integer(InterlockedCompareExchange(LTarget, LValue, LComparand));
+{$ENDIF}
 end;
 
-function AtomicIncrement(var Target: Integer; const Value: Integer): Integer; inline;
+function AtomicIncrement(var Target: Integer; const Value: Integer): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
 begin
   {$IFDEF MSWINDOWS}
   if Value = 1 then
@@ -1187,7 +1259,7 @@ begin
   {$ENDIF}
 end;
 
-function AtomicDecrement(var Target: Integer): Integer; inline;
+function AtomicDecrement(var Target: Integer): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
 begin
   Result := InterlockedDecrement(Target);
 end;
@@ -1200,7 +1272,7 @@ end;
 
 {$IFDEF WORKER_SIMPLE_LOCK}
 // 位与，返回原值
-function AtomicAnd(var Dest: Integer; const AMask: Integer): Integer; inline;
+function AtomicAnd(var Dest: Integer; const AMask: Integer): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
 var
   i: Integer;
 begin
@@ -1211,7 +1283,7 @@ begin
 end;
 
 // 位或，返回原值
-function AtomicOr(var Dest: Integer; const AMask: Integer): Integer; inline;
+function AtomicOr(var Dest: Integer; const AMask: Integer): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
 var
   i: Integer;
 begin
@@ -1223,7 +1295,7 @@ end;
 {$ENDIF}
 {$ENDIF}
 
-procedure ThreadYield; inline;
+procedure ThreadYield; {$IFDEF USEINLINE}inline;{$ENDIF}
 begin
   try
     {$IFDEF MSWINDOWS}
@@ -1556,7 +1628,11 @@ begin
   // 下面三个成员不拷贝
   Worker := nil;
   Next := nil;
+  {$IFDEF USEINLINE}
   Source := nil;
+  {$ELSE}
+  ExData.Source := nil;
+  {$ENDIF}
 end;
 
 function TJob.GetAvgTime: Integer;
@@ -1594,6 +1670,68 @@ begin
   else
     Result := TJobHandle(@Self) or AMask;
 end;
+
+{$IFNDEF USEINLINE}
+function TJob.GetFirstDelay: Int64;
+begin
+  Result := ExData.FirstDelay;
+end;
+
+function TJob.GetGroup: Pointer;
+begin
+  Result := ExData.Group;
+end;
+
+function TJob.GetInterval: Int64;
+begin
+  Result := ExData.Interval;
+end;
+
+function TJob.GetRefCount: PInteger;
+begin
+  Result := ExData.RefCount;
+end;
+
+function TJob.GetSignalId: Integer;
+begin
+  Result := ExData.SignalId;
+end;
+
+function TJob.GetSource: PJob;
+begin
+  Result := ExData.Source;
+end;
+
+procedure TJob.SetFirstDelay(const Value: Int64);
+begin
+  ExData.FirstDelay := Value;
+end;
+
+procedure TJob.SetGroup(const Value: Pointer);
+begin
+  ExData.Group := Value;
+end;
+
+procedure TJob.SetInterval(const Value: Int64);
+begin
+  ExData.Interval := Value;
+end;
+
+procedure TJob.SetRefCount(const Value: PInteger);
+begin
+  ExData.RefCount := Value;
+end;
+
+procedure TJob.SetSignalId(const Value: Integer);
+begin
+  ExData.SignalId := Value;
+end;
+
+procedure TJob.SetSource(const Value: PJob);
+begin
+  ExData.Source := Value;
+end;
+{$ENDIF}
 
 function TJob.GetFreeType: TJobDataFreeType;
 begin
@@ -2301,7 +2439,7 @@ begin
             FTimeout := 0;
             FLastActiveTime := FActiveJob.PopTime;
             FActiveJob.Worker := Self;
-            FActiveJobProc := FActiveJob^.WorkerProc.ToJobProc();
+            FActiveJobProc := ToJobProc(FActiveJob^.WorkerProc);
 
             // 为Clear(AObject)准备判断，以避免FActiveJob线程不安全
             FActiveJobData := FActiveJob.Data;
@@ -2425,6 +2563,7 @@ begin
   Result := ClearWaitJobs(ASignalId, '');
 end;
 
+{$IFDEF USEINLINE}
 function TYXDWorkers.&For(const AStartIndex, AStopIndex: TForLoopIndexType;
   AWorkerProc: TForJobProc; AData: Pointer; AMsgWait: Boolean;
   AFreeType: TJobDataFreeType): TWaitResult;
@@ -2440,6 +2579,7 @@ begin
     FreeAndNil(AInst);
   end;
 end;
+{$ENDIF}
 
 {$IFDEF UNICODE}
 function TYXDWorkers.&For(const AStartIndex, AStopIndex: TForLoopIndexType;
@@ -2460,6 +2600,7 @@ begin
 end;
 {$ENDIF}
 
+{$IFDEF USEINLINE}
 function TYXDWorkers.&For(const AStartIndex, AStopIndex: TForLoopIndexType;
   AWorkerProc: TForJobProcG; AData: Pointer; AMsgWait: Boolean;
   AFreeType: TJobDataFreeType): TWaitResult;
@@ -2475,6 +2616,7 @@ begin
     FreeAndNil(AInst);
   end;
 end;
+{$ENDIF}
 
 procedure TYXDWorkers.Clear(AHandle: TJobHandle);
 var
@@ -2976,7 +3118,7 @@ begin
   end;
 end;
 
-procedure InitJobFreeType(AOwner: TYXDWorkers; AJob: PJob; AData: Pointer; AFreeType: TJobDataFreeType); inline;
+procedure InitJobFreeType(AOwner: TYXDWorkers; AJob: PJob; AData: Pointer; AFreeType: TJobDataFreeType); {$IFDEF USEINLINE}inline;{$ENDIF}
 begin
   if AData <> nil then begin
     AJob.Flags := AJob.Flags or (Integer(AFreeType) shl 8);
@@ -3129,7 +3271,7 @@ begin
         end;
         Result[j].ActiveJobProc := FWorkers[i].FActiveJobProc;
         if FWorkers[i].FTerminatingJob <> nil then
-          Result[j].TerminatingJobProc := FWorkers[i].FTerminatingJob.WorkerProc.ToJobProc()
+          Result[j].TerminatingJobProc := ToJobProc(FWorkers[i].FTerminatingJob.WorkerProc)
         else
           Result[j].TerminatingJobProc := nil;
         {$IFDEF SAVE_WORDER_TIME}
@@ -3234,7 +3376,7 @@ begin
 end;
 
 procedure InitJob(AJob: PJob; AData: Pointer;
-  ARunInMainThread: Boolean; const ADelay, AInterval: Int64); inline;
+  ARunInMainThread: Boolean; const ADelay, AInterval: Int64); {$IFDEF USEINLINE}inline;{$ENDIF}
 begin
   AJob.Data := AData;
   if AInterval > 0 then begin
@@ -3296,7 +3438,7 @@ begin
 end;
 {$ENDIF}
 
-function TimeToDelay(const ATime: TDateTime): Int64; inline;
+function TimeToDelay(const ATime: TDateTime): Int64; {$IFDEF USEINLINE}inline;{$ENDIF}
 var
   ANow, ATemp: TDateTime;
 begin
@@ -3359,7 +3501,7 @@ begin
 end;
 {$ENDIF}
 
-procedure InitLogJob(AJob: PJob; AData: Pointer); inline;
+procedure InitLogJob(AJob: PJob; AData: Pointer); {$IFDEF USEINLINE}inline;{$ENDIF}
 begin
   AJob.Data := AData;
   AJob.SetValue(JOB_LONGTIME, True);
@@ -3413,7 +3555,7 @@ begin
 end;
 {$ENDIF}
 
-procedure InitWaitJob(AJob: PJob; ASignalId: Integer; ARunInMainThread: Boolean); inline;
+procedure InitWaitJob(AJob: PJob; ASignalId: Integer; ARunInMainThread: Boolean); {$IFDEF USEINLINE}inline;{$ENDIF}
 begin
   AJob.Data := nil;
   AJob.SignalId := ASignalId;
@@ -4160,12 +4302,12 @@ end;
 
 { TJobMethod }
 
-function TJobMethod.ToJobProc: TJobProc;
+function ToJobProc(const AMethod: TJobMethod): TJobProc;
 begin
   {$IFDEF NEXTGEN}
-  Result := PJobProc(@Self)^;
+  Result := PJobProc(@AMethod)^;
   {$ELSE} 
-  Result := Proc; 
+  Result := AMethod.Proc; 
   {$ENDIF}
 end;
 
@@ -4209,7 +4351,11 @@ begin
   end;
   FWorkJob.SetValue(JOB_RUN_ONCE, True);
   FWorkJob.SetValue(JOB_IN_MAINTHREAD, False);
+  {$IFDEF USEINLINE}
   FEvent := TEvent.Create();
+  {$ELSE}
+  FEvent := TEvent.Create(nil, True, False, '');
+  {$ENDIF}
 end;
 
 destructor TForJobs.Destroy;

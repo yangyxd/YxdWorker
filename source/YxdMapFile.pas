@@ -15,13 +15,21 @@ unit YxdMapFile;
 
 interface
 
+{$IF RTLVersion>=24}
+{$LEGACYIFEND ON}
+{$IFEND}
+
+{$IF defined(FPC) or defined(VER170) or defined(VER180) or defined(VER190) or defined(VER200) or defined(VER210)}
+  {$DEFINE USEINLINE}
+{$IFEND}
+
 {.$DEFINE TEST}  // 显示测试信息
 
 uses
   {$IFDEF MSWINDOWS}Windows, {$ENDIF}SysUtils, Classes, SyncObjs, TlHelp32, PsAPI;
 
 type
-  TMapItem = record
+  TMapItem = {$IFNDEF USEINLINE}object{$ELSE}record{$ENDIF}
   private
     function GetName: string;
   public
@@ -33,6 +41,12 @@ type
     property Name: string read GetName;
   end;
   PMapItem = ^TMapItem;
+
+  {$IFNDEF USEINLINE}
+  ULONG_PTR = Cardinal;
+  DWORD_PTR = ULONG_PTR;
+  ULONGLONG = UInt64;
+  {$ENDIF}
 
 type
   TLineItem = packed record
@@ -101,6 +115,7 @@ type
   public
     constructor Create();
     destructor Destroy; override;
+    procedure LoadFromFile(const FName: string);
     {$IFDEF MSWINDOWS}
     procedure LoadDefault;
     function FindImportList(const Addr: Pointer): PImportLineItem;
@@ -265,6 +280,7 @@ function GetProcessThreadInfo(AProcId: THandle; const LineChar: string = SLineBr
 
 var
   NtQueryInformationThread: TNtQueryInformationThread;
+  FMapData: TYxdMapFile;
 
 implementation
 
@@ -400,7 +416,6 @@ type
   PDWORD = ^Cardinal;
  {$ENDIF}
 var
-  FMapData: TYxdMapFile;
   hDLL: HModule = 0;
   {$IFDEF MSWINDOWS}
   EIP: Cardinal;
@@ -848,7 +863,7 @@ begin
   end;
 end;
 
-function SkipLine(var P: PChar): Integer; inline;
+function SkipLine(var P: PChar): Integer; {$IFDEF USEINLINE}inline;{$ENDIF}
 var
   ps: PChar;
 begin
@@ -885,7 +900,7 @@ begin
   Result:= IntPtr(p) - IntPtr(ps);
 end;
 
-function PCharToStr(p: PChar; len: Integer): string; inline;
+function PCharToStr(p: PChar; len: Integer): string; {$IFDEF USEINLINE}inline;{$ENDIF}
 begin
   if (len > 0) and (p <> nil) then begin
     SetLength(Result, len);
@@ -1018,31 +1033,7 @@ begin
   FStream := nil;
   {$ENDIF}
   FName := ChangeFileExt(ParamStr(0), '.map');
-  if FileExists(FName) then begin
-    {$IFDEF UNICODE}
-    S := TMemoryStream.Create;
-    try
-      S.LoadFromFile(FName);
-      FStr := LoadTextW(S);
-      FValue := PChar(FStr);
-      FSize := Length(FStr);
-    finally
-      S.Free;
-    end;
-    {$ELSE}
-    FStream := TMemoryStream.Create;
-    FStream.LoadFromFile(FName);
-    FValue := FStream.Memory;
-    FSize := FStream.Size;
-    {$ENDIF}
-    {$IFDEF TEST}T := GetTickCount;{$ENDIF}
-    InitMap();
-    {$IFDEF TEST}
-    T := GetTickCount - T;
-    MessageBox(0, PChar(Format('加载 Map 用时 %d ms. 共 %d 条数据。', [T, Length(FMap)])), 'MapFile', 64);
-    {$ENDIF}
-  end else
-    FValue := '';
+  LoadFromFile(FName);
   // 加载本地符号表
 end;
 
@@ -1615,7 +1606,41 @@ begin
     FSortimports[I] := @FImportList[I];
   QuickSort(@FSortimports, 0, K-1);
 end;
+
 {$ENDIF}
+
+procedure TYxdMapFile.LoadFromFile(const FName: string);
+begin
+  if FileExists(FName) then begin
+    {$IFDEF UNICODE}
+    S := TMemoryStream.Create;
+    try
+      S.LoadFromFile(FName);
+      FStr := LoadTextW(S);
+      FValue := PChar(FStr);
+      FSize := Length(FStr);
+    finally
+      S.Free;
+    end;
+    {$ELSE}
+    FStream := TMemoryStream.Create;
+    FStream.LoadFromFile(FName);
+    FValue := FStream.Memory;
+    FSize := FStream.Size;
+    {$ENDIF}
+    {$IFDEF TEST}T := GetTickCount;{$ENDIF}
+    SetLength(FMap, 0);
+    SetLength(FRow, 0);
+    SetLength(FSortMap, 0);
+    SetLength(FSortRow, 0);
+    InitMap();
+    {$IFDEF TEST}
+    T := GetTickCount - T;
+    MessageBox(0, PChar(Format('加载 Map 用时 %d ms. 共 %d 条数据。', [T, Length(FMap)])), 'MapFile', 64);
+    {$ENDIF}
+  end else
+    FValue := '';
+end;
 
 procedure TYxdMapFile.QuickSort(List: PPList; L, R: Integer);
 var
