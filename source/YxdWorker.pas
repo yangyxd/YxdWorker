@@ -18,6 +18,10 @@
   更新记录
  --------------------------------------------------------------------
 
+ 2017.09.25 ver 1.1.10
+ --------------------------------------------------------------------
+  * 同步 QWorker 更新JobGroup的问题
+  
  2017.07.28 ver 1.1.9
  --------------------------------------------------------------------
   - 兼容 D7
@@ -4133,16 +4137,22 @@ begin
         FItems.Delete(i);
         if FItems.Count = 0 then begin
           AIsDone := true;
-          FWaitResult := wrSignaled;
-          FEvent.SetEvent;
+          FWaitResult := wrSignaled;          
+          AtomicExchange(FPosted, 0);
         end else if ByOrder then begin
           if FOwner.Post(FItems[0]) = 0 then begin
             AtomicDecrement(FPosted);
             FItems.Delete(0); // 投寄失败时，Post自动释放了作业
-            AIsDone := True;
             FWaitResult := wrAbandoned;
-            FEvent.SetEvent;
+            AIsDone := True;
           end;
+        end else if (FOwner.FMaxWorkers > 0) and (FPosted <= FOwner.FMaxWorkers) and (FPosted <= FItems.Count) then begin
+          if FOwner.Post(FItems[FPosted-1]) = 0 then begin
+            AtomicDecrement(FPosted);
+            FItems.Delete(0); // 投寄失败时，Post自动释放了作业
+            FWaitResult := wrAbandoned;
+            AIsDone := True;
+          end
         end else
           AtomicDecrement(FPosted);
       end else begin
@@ -4154,14 +4164,15 @@ begin
             FWaitResult := wrAbandoned;
             AtomicExchange(FCanceled, 0);
           end;
-          FEvent.SetEvent;
         end;
       end;
     finally
       FLocker.Leave;
     end;
-    if AIsDone then
+    if AIsDone then begin
+      FEvent.SetEvent;
       DoAfterDone;
+    end;
   end;
 end;
 
@@ -4259,8 +4270,10 @@ begin
     finally
       FLocker.Leave;
     end;
-    if FWaitResult <> wrIOCompletion then
+    if FWaitResult <> wrIOCompletion then begin
       DoAfterDone;
+      FEvent.SetEvent;
+    end;
   end;
 end;
 
