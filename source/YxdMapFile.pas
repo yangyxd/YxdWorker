@@ -278,6 +278,9 @@ function GetFunctionInfo(Addr: Pointer): String;
 function GetProcessThreadInfo(AProcId: THandle; const LineChar: string = SLineBreak;
   CheckCycle: Boolean = False): TThreadInfoExList;
 
+function OpenThread(dwDesiredAccess: DWORD; bInheritHandle: Boolean;
+  dwThreadId: Cardinal): THandle; stdcall;
+
 var
   NtQueryInformationThread: TNtQueryInformationThread;
   FMapData: TYxdMapFile;
@@ -1475,20 +1478,23 @@ procedure TYxdMapFile.LoadDefault;
             if AModule <> 0 then begin
               ADLL := ExtractFileName(ADLL);
               AFile.Position := Int64(AImport.FirstThunk) + AOffset;
-              repeat
-                AFile.ReadBuffer(AThunk, SizeOf(IMAGE_THUNK_DATA));
-                ALastPos := AFile.Position;
-                if AThunk.Ordinal <> 0 then begin
-                  AFile.Position := Int64(AThunk.Ordinal) + AOffset;
-                  AFile.Read(ABuffer[0], 520);
-                  if PImageImportByName(@ABuffer[0]).Hint = 0 then begin
-                    AName := PCharToStr(@PImageImportByName(@ABuffer[0]).Name[0], -1);
-                    AddItem(ADLL + ', ' + AName, GetProcAddress(AModule, PAnsiChar(AnsiString(AName))));
-                    Inc(J);
-                    AFile.Position := ALastPos;
+              try
+                repeat
+                  AFile.ReadBuffer(AThunk, SizeOf(IMAGE_THUNK_DATA));
+                  ALastPos := AFile.Position;
+                  if AThunk.Ordinal <> 0 then begin
+                    AFile.Position := Int64(AThunk.Ordinal) + AOffset;
+                    AFile.Read(ABuffer[0], 520);
+                    if PImageImportByName(@ABuffer[0]).Hint = 0 then begin
+                      AName := PCharToStr(@PImageImportByName(@ABuffer[0]).Name[0], -1);
+                      AddItem(ADLL + ', ' + AName, GetProcAddress(AModule, PAnsiChar(AnsiString(AName))));
+                      Inc(J);
+                      AFile.Position := ALastPos;
+                    end;
                   end;
-                end;
-              until AThunk.Ordinal = 0;
+                until AThunk.Ordinal = 0;
+              except
+              end;
             end; 
             AImport := Pointer(IntPtr(AImport) + SizeOf(TImageImportDescriptor));
           end;
