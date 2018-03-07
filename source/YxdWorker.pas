@@ -4438,10 +4438,10 @@ var
   i: Integer;
 begin
   FWorkJob.StartTime := GetTimestamp;
-  Workers.DisableWorkers;
+  FOwner.DisableWorkers;
   for i := 0 to FWorkerCount - 1 do
-    Workers.Post(DoJob, nil);
-  Workers.EnableWorkers;
+    FOwner.Post(DoJob, nil);
+  FOwner.EnableWorkers;
 end;
 
 function TForJobs.Wait(AMsgWait: Boolean): TWaitResult;

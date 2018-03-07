@@ -1028,7 +1028,10 @@ var
   {$ENDIF}
 begin
   {$IFDEF MSWINDOWS}
-  LoadDefault();
+  try
+    LoadDefault();
+  except
+  end;
   {$ENDIF}
   {$IFDEF UNICODE}
   FStr := '';
@@ -1135,7 +1138,7 @@ end;
 
 procedure TYxdMapFile.InitMap();
 var
-  I, J, K, M: Integer;
+  I, J, K, M, N: Integer;
   P, PC, PL, PB: PChar;
 begin
   P := FValue;
@@ -1249,7 +1252,11 @@ begin
       FMap[J].Len := PC - P - 1;
       SkipSpace(PC);
     end;
-    FMap[J].Line := PLineItem(FSortRow[IndexOf(@FSortRow, FMap[J].Addr)]).Line;
+    N := IndexOf(@FSortRow, FMap[J].Addr);
+    if N >= 0 then
+      FMap[J].Line := PLineItem(FSortRow[N]).Line
+    else
+      FMap[J].Line := 0;
     Inc(J);
   end;
   SetLength(FMap, J);
@@ -1616,6 +1623,10 @@ end;
 {$ENDIF}
 
 procedure TYxdMapFile.LoadFromFile(const FName: string);
+{$IFDEF TEST}
+var
+  T: Cardinal;
+{$ENDIF}
 begin
   if FileExists(FName) then begin
     {$IFDEF UNICODE}
