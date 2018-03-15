@@ -122,6 +122,7 @@ type
     {$ENDIF}
     function GetDesc(const Addr: Pointer): string;
     function GetMap(const Addr: Pointer): PMapItem;
+    property BaseAddr: Cardinal read FBaseAddr;
   end;
 
 const
