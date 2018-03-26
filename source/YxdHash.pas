@@ -2,7 +2,7 @@
 {                                                       }
 {       YxdHash    哈希表，哈希函数                     }
 {                                                       }
-{       版权所有 (C) 2013      YangYxd                  }
+{       版权所有 (C) 2013 - 2019      YangYxd           }
 {                                                       }
 {*******************************************************}
 {
@@ -17,6 +17,10 @@
  --------------------------------------------------------------------
   更新记录
  --------------------------------------------------------------------
+
+ 2018.03.26 ver 1.0.11
+ --------------------------------------------------------------------
+  - 加强 StringHash, IntHash 功能
 
  2015.06.29 ver 1.0.10
  --------------------------------------------------------------------
@@ -159,7 +163,12 @@ type
   THashItem = record
     Next: PHashItem;
     Key: string;
-    Value: Number;
+    case Int64 of
+      0: (Value: Number);
+      1: (AsNumber: Number);
+      2: (AsDouble: Double);
+      3: (AsInt64: Int64);
+      4: (AsPointer: Pointer);
   end;
 
 type
@@ -171,27 +180,58 @@ type
 
   TStringHash = class
   private
-    FLocker: TCriticalSection;
     FCount: Integer;
     FOnFreeItem: TYXDStrHashItemFreeNotify;
     function GetBucketsCount: Integer;
     function GetValueItem(const Key: string): Number;
     procedure SetValueItem(const Key: string; const Value: Number);
+    function GetItem(const Key: string): THashItem;
   public
     Buckets: array of PHashItem;
+    FLocker: TCriticalSection;
     constructor Create(Size: Cardinal = 331);
     destructor Destroy; override;
     function Find(const Key: string): PPHashItem;
-    procedure Add(const Key: string; Value: Number);
-    procedure AddOrUpdate(const Key: string; Value: Number);
     procedure Clear;
     procedure Lock;
     procedure UnLock;
     procedure Remove(const Key: string);
-    function Modify(const Key: string; Value: Number): Boolean;
+
+    procedure GetItems(AList: TList);
+    procedure GetKeyList(AList: TStrings);
+
+    procedure DoFreePointerItem(Item: PHashItem); 
+    
     function ValueOf(const Key: string; const DefaultValue: Number = -1): Number;
     function Exists(const Key: string): Boolean;
+
+    procedure Add(const Key: string; const Value: Number); overload;
+    procedure Add(const Key: string; const Value: Double); overload;
+    procedure Add(const Key: string; const Value: Int64); overload;
+    procedure Add(const Key: string; const Value: Pointer); overload;
+
+    procedure AddOrUpdate(const Key: string; const Value: Number); overload;
+    procedure AddOrUpdate(const Key: string; const Value: Double); overload;
+    procedure AddOrUpdate(const Key: string; const Value: Int64); overload;
+    procedure AddOrUpdate(const Key: string; const Value: Pointer); overload;
+
+    function Modify(const Key: string; const Value: Number): Boolean; overload;
+    function Modify(const Key: string; const Value: Double): Boolean; overload;
+    function Modify(const Key: string; const Value: Int64): Boolean; overload;
+    function Modify(const Key: string; const Value: Pointer): Boolean; overload;
+
+    function TryGetValue(const Key: string; var OutValue: Number): Boolean; overload;
+    function TryGetValue(const Key: string; var OutValue: Int64): Boolean; overload;
+    function TryGetValue(const Key: string; var OutValue: Double): Boolean; overload;
+    function TryGetValue(const Key: string; var OutValue: Pointer): Boolean; overload;
+
+    function GetInt(const Key: string; const DefaultValue: Number = -1): Number;
+    function GetInt64(const Key: string; const DefaultValue: Int64 = -1): Int64;
+    function GetFolat(const Key: string; const DefaultValue: Double = -1): Double;
+    function GetPointer(const Key: string): Pointer;
+
     property Values[const Key: string]: Number read GetValueItem write SetValueItem;
+    property Items[const Key: string]: THashItem read GetItem;
     property Count: Integer read FCount;
     property BucketsCount: Integer read GetBucketsCount;
     property OnFreeItem: TYXDStrHashItemFreeNotify read FOnFreeItem write FOnFreeItem;
@@ -203,7 +243,12 @@ type
   TIntHashItem = record
     Next: PIntHashItem;
     Key: THashType;
-    Value: Number;
+    case Int64 of
+      0: (Value: Number);
+      1: (AsNumber: Number);
+      2: (AsDouble: Double);
+      3: (AsInt64: Int64);
+      4: (AsPointer: Pointer);
   end;
 
   /// <summary>删除哈希表一个元素的通知</summary>
@@ -220,21 +265,50 @@ type
     function GetBucketsCount: Integer;
     function GetValueItem(const Key: THashType): Number;
     procedure SetValueItem(const Key: THashType; const Value: Number);
+    function GetItem(const Key: THashType): TIntHashItem;
   public
     Buckets: array of PIntHashItem;
     constructor Create(Size: Cardinal = 331);
     destructor Destroy; override;
-    function Find(const Key: THashType): PPIntHashItem;
-    procedure Add(const Key: THashType; Value: Number);
-    procedure AddOrUpdate(const Key: THashType; Value: Number);
     procedure Clear;
     procedure Lock;
     procedure UnLock;
+    function Find(const Key: THashType): PPIntHashItem;
     function Remove(const Key: THashType): Boolean;
-    function Modify(const Key: THashType; Value: Number): Boolean;
     function ValueOf(const Key: THashType; const DefaultValue: Number = -1): Number;
     function Exists(const Key: THashType): Boolean;
+
+    procedure GetItems(AList: TList);
+    procedure GetKeyList(AList: TStrings);
+    procedure DoFreePointerItem(Item: PHashItem); 
+
+    procedure Add(const Key: THashType; const Value: Number); overload;
+    procedure Add(const Key: THashType; const Value: Double); overload;
+    procedure Add(const Key: THashType; const Value: Int64); overload;
+    procedure Add(const Key: THashType; const Value: Pointer); overload;
+
+    procedure AddOrUpdate(const Key: THashType; const Value: Number); overload;
+    procedure AddOrUpdate(const Key: THashType; const Value: Double); overload;
+    procedure AddOrUpdate(const Key: THashType; const Value: Int64); overload;
+    procedure AddOrUpdate(const Key: THashType; const Value: Pointer); overload;
+
+    function Modify(const Key: THashType; const Value: Number): Boolean; overload;
+    function Modify(const Key: THashType; const Value: Double): Boolean; overload;
+    function Modify(const Key: THashType; const Value: Int64): Boolean; overload;
+    function Modify(const Key: THashType; const Value: Pointer): Boolean; overload;
+
+    function TryGetValue(const Key: THashType; var OutValue: Number): Boolean; overload;
+    function TryGetValue(const Key: THashType; var OutValue: Int64): Boolean; overload;
+    function TryGetValue(const Key: THashType; var OutValue: Double): Boolean; overload;
+    function TryGetValue(const Key: THashType; var OutValue: Pointer): Boolean; overload;
+
+    function GetInt(const Key: THashType; const DefaultValue: Number = -1): Number;
+    function GetInt64(const Key: THashType; const DefaultValue: Int64 = -1): Int64;
+    function GetFolat(const Key: THashType; const DefaultValue: Double = -1): Double;
+    function GetPointer(const Key: THashType): Pointer;
+
     property Values[const Key: THashType]: Number read GetValueItem write SetValueItem;
+    property Items[const Key: THashType]: TIntHashItem read GetItem;
     property Count: Integer read FCount;
     property BucketsCount: Integer read GetBucketsCount;
     property OnFreeItem: TYXDIntHashItemFreeNotify read FOnFreeItem write FOnFreeItem;
@@ -500,7 +574,7 @@ end;
 
 { TStringHash }
 
-procedure TStringHash.Add(const Key: string; Value: Number);
+procedure TStringHash.Add(const Key: string; const Value: Number);
 var
   Hash: Integer;
   Bucket: PHashItem;
@@ -516,7 +590,73 @@ begin
   FLocker.Leave;
 end;
 
-procedure TStringHash.AddOrUpdate(const Key: string; Value: Number);
+procedure TStringHash.Add(const Key: string; const Value: Double);
+var
+  Hash: Integer;
+  Bucket: PHashItem;
+begin
+  Hash := HashOf(Key) mod Cardinal(Length(Buckets));
+  New(Bucket);
+  Bucket^.Key := Key;
+  Bucket^.AsDouble := Value;
+  FLocker.Enter;
+  Bucket^.Next := Buckets[Hash];
+  Buckets[Hash] := Bucket;
+  Inc(FCount);
+  FLocker.Leave;
+end;
+
+procedure TStringHash.Add(const Key: string; const Value: Int64);
+var
+  Hash: Integer;
+  Bucket: PHashItem;
+begin
+  Hash := HashOf(Key) mod Cardinal(Length(Buckets));
+  New(Bucket);
+  Bucket^.Key := Key;
+  Bucket^.AsInt64 := Value;
+  FLocker.Enter;
+  Bucket^.Next := Buckets[Hash];
+  Buckets[Hash] := Bucket;
+  Inc(FCount);
+  FLocker.Leave; 
+end;
+
+procedure TStringHash.Add(const Key: string; const Value: Pointer);
+var
+  Hash: Integer;
+  Bucket: PHashItem;
+begin
+  Hash := HashOf(Key) mod Cardinal(Length(Buckets));
+  New(Bucket);
+  Bucket^.Key := Key;
+  Bucket^.AsPointer := Value;
+  FLocker.Enter;
+  Bucket^.Next := Buckets[Hash];
+  Buckets[Hash] := Bucket;
+  Inc(FCount);
+  FLocker.Leave;
+end;
+
+procedure TStringHash.AddOrUpdate(const Key: string; const Value: Number);
+begin
+  if not Modify(Key, Value) then
+    Add(Key, Value);
+end;
+
+procedure TStringHash.AddOrUpdate(const Key: string; const Value: Int64);
+begin
+  if not Modify(Key, Value) then
+    Add(Key, Value);
+end;
+
+procedure TStringHash.AddOrUpdate(const Key: string; const Value: Double);
+begin
+  if not Modify(Key, Value) then
+    Add(Key, Value);
+end;
+
+procedure TStringHash.AddOrUpdate(const Key: string; const Value: Pointer);
 begin
   if not Modify(Key, Value) then
     Add(Key, Value);
@@ -562,6 +702,12 @@ begin
   end;
 end;
 
+procedure TStringHash.DoFreePointerItem(Item: PHashItem);
+begin
+  if (Item <> nil) and (Item.AsPointer <> nil) then
+    Dispose(Item.AsPointer);
+end;
+
 function TStringHash.Exists(const Key: string): Boolean;
 begin
   FLocker.Enter;
@@ -589,6 +735,121 @@ begin
   Result := Length(Buckets);
 end;
 
+function TStringHash.GetFolat(const Key: string;
+  const DefaultValue: Double): Double;
+var
+  P: PHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+    Result := P^.AsDouble
+  else
+    Result := DefaultValue;
+  FLocker.Leave;
+end;
+
+function TStringHash.GetInt(const Key: string;
+  const DefaultValue: Number): Number;
+var
+  P: PHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+    Result := P^.AsNumber
+  else
+    Result := DefaultValue;
+  FLocker.Leave;
+end;
+
+function TStringHash.GetInt64(const Key: string;
+  const DefaultValue: Int64): Int64;
+var
+  P: PHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+    Result := P^.AsInt64
+  else
+    Result := DefaultValue;
+  FLocker.Leave;
+end;
+
+function TStringHash.GetItem(const Key: string): THashItem;
+var
+  P: PHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+    Result := P^
+  else begin
+    Result.Next := nil;
+    Result.Key := '';
+    Result.AsInt64 := 0;
+  end;
+  FLocker.Leave;
+end;
+
+procedure TStringHash.GetItems(AList: TList);
+var
+  P: PHashItem;
+  I: Integer;
+begin
+  if not Assigned(AList) then
+    Exit;
+  FLocker.Enter;
+  try
+    for I := 0 to High(Buckets) do begin
+      P := Buckets[I];
+      while P <> nil do begin
+        if P.AsPointer <> nil then
+          AList.Add(P.AsPointer);
+        P := P.Next;
+      end;
+    end;
+  finally
+    FLocker.Leave;
+  end;
+end;
+
+procedure TStringHash.GetKeyList(AList: TStrings);
+var
+  P: PHashItem;
+  I: Integer;
+begin
+  if not Assigned(AList) then
+    Exit;
+  FLocker.Enter;
+  try
+    for I := 0 to High(Buckets) do begin
+      P := Buckets[I];
+      while P <> nil do begin
+        if P.Key <> '' then
+          AList.Add(P.Key);
+        P := P.Next;
+      end;
+    end;
+  finally
+    FLocker.Leave;
+  end;
+end;
+
+function TStringHash.GetPointer(const Key: string): Pointer;
+var
+  P: PHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+    Result := P^.AsPointer
+  else
+    Result := nil;
+  FLocker.Leave;
+end;
+
 function TStringHash.GetValueItem(const Key: string): Number;
 begin
   Result := ValueOf(Key);
@@ -599,7 +860,58 @@ begin
   FLocker.Enter;
 end;
 
-function TStringHash.Modify(const Key: string; Value: Number): Boolean;
+function TStringHash.Modify(const Key: string; const Value: Pointer): Boolean;
+var
+  P: PHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+  begin
+    Result := True;
+    if Assigned(FOnFreeItem) then
+      FOnFreeItem(P);
+    P^.AsPointer := Value;
+  end else
+    Result := False;
+  FLocker.Leave;
+end;
+
+function TStringHash.Modify(const Key: string; const Value: Int64): Boolean;
+var
+  P: PHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+  begin
+    Result := True;
+    if Assigned(FOnFreeItem) then
+      FOnFreeItem(P);
+    P^.AsInt64 := Value;
+  end else
+    Result := False;
+  FLocker.Leave;
+end;
+
+function TStringHash.Modify(const Key: string; const Value: Double): Boolean;
+var
+  P: PHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+  begin
+    Result := True;
+    if Assigned(FOnFreeItem) then
+      FOnFreeItem(P);
+    P^.AsDouble := Value;
+  end else
+    Result := False;
+  FLocker.Leave;
+end;
+
+function TStringHash.Modify(const Key: string; const Value: Number): Boolean;
 var
   P: PHashItem;
 begin
@@ -641,6 +953,66 @@ begin
   AddOrUpdate(Key, Value);
 end;
 
+function TStringHash.TryGetValue(const Key: string;
+  var OutValue: Int64): Boolean;
+var
+  P: PHashItem;
+begin
+  Result := False;
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then begin
+    OutValue := P^.AsInt64;
+    Result := True;
+  end;
+  FLocker.Leave;
+end;
+
+function TStringHash.TryGetValue(const Key: string;
+  var OutValue: Double): Boolean;
+var
+  P: PHashItem;
+begin
+  Result := False;
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then begin
+    OutValue := P^.AsDouble;
+    Result := True;
+  end;
+  FLocker.Leave;
+end;
+
+function TStringHash.TryGetValue(const Key: string;
+  var OutValue: Pointer): Boolean;
+var
+  P: PHashItem;
+begin
+  Result := False;
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then begin
+    OutValue := P^.AsPointer;
+    Result := True;
+  end;
+  FLocker.Leave;
+end;
+
+function TStringHash.TryGetValue(const Key: string;
+  var OutValue: Number): Boolean;
+var
+  P: PHashItem;
+begin
+  Result := False;
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then begin
+    OutValue := P^.AsNumber;
+    Result := True;
+  end;
+  FLocker.Leave;
+end;
+
 procedure TStringHash.UnLock;
 begin
   FLocker.Leave;
@@ -661,7 +1033,7 @@ end;
 
 { TIntHash }
 
-procedure TIntHash.Add(const Key: THashType; Value: Number);
+procedure TIntHash.Add(const Key: THashType; const Value: Number);
 var
   Hash: Integer;
   Bucket: PIntHashItem;
@@ -677,7 +1049,73 @@ begin
   FLocker.Leave;
 end;
 
-procedure TIntHash.AddOrUpdate(const Key: THashType; Value: Number);
+procedure TIntHash.Add(const Key: THashType; const Value: Int64);
+var
+  Hash: Integer;
+  Bucket: PIntHashItem;
+begin
+  Hash := Key mod Cardinal(Length(Buckets));
+  New(Bucket);
+  Bucket^.Key := Key;
+  Bucket^.AsInt64 := Value;
+  FLocker.Enter;
+  Bucket^.Next := Buckets[Hash];
+  Buckets[Hash] := Bucket;
+  Inc(FCount);
+  FLocker.Leave;
+end;
+
+procedure TIntHash.Add(const Key: THashType; const Value: Double);
+var
+  Hash: Integer;
+  Bucket: PIntHashItem;
+begin
+  Hash := Key mod Cardinal(Length(Buckets));
+  New(Bucket);
+  Bucket^.Key := Key;
+  Bucket^.AsDouble := Value;
+  FLocker.Enter;
+  Bucket^.Next := Buckets[Hash];
+  Buckets[Hash] := Bucket;
+  Inc(FCount);
+  FLocker.Leave;
+end;
+
+procedure TIntHash.Add(const Key: THashType; const Value: Pointer);
+var
+  Hash: Integer;
+  Bucket: PIntHashItem;
+begin
+  Hash := Key mod Cardinal(Length(Buckets));
+  New(Bucket);
+  Bucket^.Key := Key;
+  Bucket^.AsPointer := Value;
+  FLocker.Enter;
+  Bucket^.Next := Buckets[Hash];
+  Buckets[Hash] := Bucket;
+  Inc(FCount);
+  FLocker.Leave;
+end;
+
+procedure TIntHash.AddOrUpdate(const Key: THashType; const Value: Number);
+begin
+  if not Modify(Key, Value) then
+    Add(Key, Value);
+end;
+
+procedure TIntHash.AddOrUpdate(const Key: THashType; const Value: Double);
+begin
+  if not Modify(Key, Value) then
+    Add(Key, Value);
+end;
+
+procedure TIntHash.AddOrUpdate(const Key: THashType; const Value: Pointer);
+begin
+  if not Modify(Key, Value) then
+    Add(Key, Value);
+end;
+
+procedure TIntHash.AddOrUpdate(const Key: THashType; const Value: Int64);
 begin
   if not Modify(Key, Value) then
     Add(Key, Value);
@@ -722,6 +1160,11 @@ begin
   end;
 end;
 
+procedure TIntHash.DoFreePointerItem(Item: PHashItem);
+begin
+
+end;
+
 function TIntHash.Exists(const Key: THashType): Boolean;
 begin
   FLocker.Enter;
@@ -745,6 +1188,121 @@ begin
   Result := Length(Buckets);
 end;
 
+function TIntHash.GetFolat(const Key: THashType;
+  const DefaultValue: Double): Double;
+var
+  P: PIntHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+    Result := P^.AsDouble
+  else
+    Result := DefaultValue;
+  FLocker.Leave;
+end;
+
+function TIntHash.GetInt(const Key: THashType;
+  const DefaultValue: Number): Number;
+var
+  P: PIntHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+    Result := P^.AsNumber
+  else
+    Result := DefaultValue;
+  FLocker.Leave;
+end;
+
+function TIntHash.GetInt64(const Key: THashType;
+  const DefaultValue: Int64): Int64;
+var
+  P: PIntHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+    Result := P^.AsInt64
+  else
+    Result := DefaultValue;
+  FLocker.Leave;
+end;
+
+function TIntHash.GetItem(const Key: THashType): TIntHashItem;
+var
+  P: PIntHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+    Result := P^
+  else begin
+    Result.Next := nil;
+    Result.Key := 0;
+    Result.AsInt64 := 0;
+  end;
+  FLocker.Leave;
+end;
+
+procedure TIntHash.GetItems(AList: TList);
+var
+  P: PIntHashItem;
+  I: Integer;
+begin
+  if not Assigned(AList) then
+    Exit;
+  FLocker.Enter;
+  try
+    for I := 0 to High(Buckets) do begin
+      P := Buckets[I];
+      while P <> nil do begin
+        if Pointer(P.Value) <> nil then
+          AList.Add(Pointer(P.Value));
+        P := P.Next;
+      end;
+    end;
+  finally
+    FLocker.Leave;
+  end;
+end;
+
+procedure TIntHash.GetKeyList(AList: TStrings);
+var
+  P: PIntHashItem;
+  I: Integer;
+begin
+  if not Assigned(AList) then
+    Exit;
+  FLocker.Enter;
+  try
+    for I := 0 to High(Buckets) do begin
+      P := Buckets[I];
+      while P <> nil do begin
+        if P.Key <> 0 then
+          AList.Add(IntToStr(P.Key));
+        P := P.Next;
+      end;
+    end;
+  finally
+    FLocker.Leave;
+  end;
+end;
+
+function TIntHash.GetPointer(const Key: THashType): Pointer;
+var
+  P: PIntHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+    Result := P^.AsPointer
+  else
+    Result := nil;
+  FLocker.Leave;
+end;
+
 function TIntHash.GetValueItem(const Key: THashType): Number;
 begin
   Result := ValueOf(Key);
@@ -755,7 +1313,61 @@ begin
   FLocker.Enter;
 end;
 
-function TIntHash.Modify(const Key: THashType; Value: Number): Boolean;
+function TIntHash.Modify(const Key: THashType; const Value: Double): Boolean;
+var
+  P: PIntHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+  begin
+    Result := True;
+    if Assigned(FOnFreeItem) then
+      FOnFreeItem(P);
+    P^.AsDouble := Value;
+  end
+  else
+    Result := False;
+  FLocker.Leave;
+end;
+
+function TIntHash.Modify(const Key: THashType; const Value: Pointer): Boolean;
+var
+  P: PIntHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+  begin
+    Result := True;
+    if Assigned(FOnFreeItem) then
+      FOnFreeItem(P);
+    P^.AsPointer := Value;
+  end
+  else
+    Result := False;
+  FLocker.Leave;
+end;
+
+function TIntHash.Modify(const Key: THashType; const Value: Int64): Boolean;
+var
+  P: PIntHashItem;
+begin
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then
+  begin
+    Result := True;
+    if Assigned(FOnFreeItem) then
+      FOnFreeItem(P);
+    P^.AsInt64 := Value;
+  end
+  else
+    Result := False;
+  FLocker.Leave;
+end;
+
+function TIntHash.Modify(const Key: THashType; const Value: Number): Boolean;
 var
   P: PIntHashItem;
 begin
@@ -795,6 +1407,66 @@ end;
 procedure TIntHash.SetValueItem(const Key: THashType; const Value: Number);
 begin
   AddOrUpdate(Key, Value);
+end;
+
+function TIntHash.TryGetValue(const Key: THashType;
+  var OutValue: Double): Boolean;
+var
+  P: PIntHashItem;
+begin
+  Result := False;
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then begin
+    OutValue := P^.AsDouble;
+    Result := True;
+  end;
+  FLocker.Leave;
+end;
+
+function TIntHash.TryGetValue(const Key: THashType;
+  var OutValue: Pointer): Boolean;
+var
+  P: PIntHashItem;
+begin
+  Result := False;
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then begin
+    OutValue := P^.AsPointer;
+    Result := True;
+  end;
+  FLocker.Leave;
+end;
+
+function TIntHash.TryGetValue(const Key: THashType;
+  var OutValue: Number): Boolean;
+var
+  P: PIntHashItem;
+begin
+  Result := False;
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then begin
+    OutValue := P^.AsNumber;
+    Result := True;
+  end;
+  FLocker.Leave;
+end;
+
+function TIntHash.TryGetValue(const Key: THashType;
+  var OutValue: Int64): Boolean;
+var
+  P: PIntHashItem;
+begin
+  Result := False;
+  FLocker.Enter;
+  P := Find(Key)^;
+  if P <> nil then begin
+    OutValue := P^.AsInt64;
+    Result := True;
+  end;
+  FLocker.Leave;
 end;
 
 procedure TIntHash.UnLock;
