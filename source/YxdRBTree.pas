@@ -496,6 +496,7 @@ begin
         {.$REGION 'Case 1 - right rotate at AParent'}
         AParent.Left := sibling.Right;
         tmp1 := sibling.Right;
+        sibling.Right := AParent;
         tmp1.SetParentAndColor(AParent, RB_BLACK);
         RotateSetParents(AParent, sibling, RB_RED);
         DoRotate(AParent, sibling);
