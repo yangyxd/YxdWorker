@@ -4565,7 +4565,7 @@ end;
 {$IFDEF AutoFreeJobExData}
 procedure TJobExtData.DoAddToExDataMap;
 begin
-  ExDataMap.Add(THashType(Self), 1);
+  ExDataMap.Add(THashType(Self), NativeInt(1));
 end;
 {$ENDIF}
 

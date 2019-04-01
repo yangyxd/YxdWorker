@@ -1627,6 +1627,13 @@ procedure TYxdMapFile.LoadFromFile(const FName: string);
 {$IFDEF TEST}
 var
   T: Cardinal;
+  {$IFDEF UNICODE}
+  S: TMemoryStream;
+  {$ENDIF}
+{$ELSE}
+{$IFDEF UNICODE}
+var S: TMemoryStream;
+{$ENDIF}
 {$ENDIF}
 begin
   if FileExists(FName) then begin
