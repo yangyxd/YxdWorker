@@ -1025,7 +1025,7 @@ var
   T: Cardinal;
   {$ENDIF}
   {$IFDEF UNICODE}
-  S: TMemoryStream;
+  //S: TMemoryStream;
   {$ENDIF}
 begin
   {$IFDEF MSWINDOWS}

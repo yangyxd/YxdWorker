@@ -2,7 +2,7 @@
 {                                                       }
 {       YxdWorker 后台工作者管理库                      }
 {                                                       }
-{       版权所有 (C) 2013 - 2015      YangYxd           }
+{       版权所有 (C) 2013 - 2019      YangYxd           }
 {                                                       }
 {*******************************************************}
 {
@@ -18,6 +18,10 @@
   更新记录
  --------------------------------------------------------------------
 
+ 2019.07.31 ver 1.1.11
+ --------------------------------------------------------------------
+  * 修复Clear卡死、退不出去、作业线程没有超时自动关闭等问题
+  
  2017.09.25 ver 1.1.10
  --------------------------------------------------------------------
   * 同步 QWorker 更新JobGroup的问题
@@ -581,6 +585,7 @@ type
     constructor Create(AOwner: TYXDWorkers); overload;
     destructor Destroy; override;
     procedure ComNeeded(AInitFlags: Cardinal = 0);
+    procedure ForceQuit;
     // 判断COM是否已经初始化为支持COM
     property ComInitialized: Boolean index WORKER_COM_INITED read GetValue;
     // 判断当前是否处于长时间作业处理过程中
@@ -594,6 +599,7 @@ type
     property IsExecuted: Boolean index WORKER_EXECUTED read GetValue;
     property IsFiring: Boolean index WORKER_FIRING read GetValue;
     property IsRunning: Boolean index WORKER_RUNNING read GetValue;
+    property IsCleaning: Boolean index WORKER_CLEANING read GetValue;
     {$IFDEF SAVE_WORDER_TIME}
     // 工作者出生时间
     property StartTime: Int64 read FStartTime;
@@ -660,6 +666,7 @@ type
     FSignalJobs: TYXDHashTable;
 
     FStaticThread: TThread;
+    FTerminateEvent: TEvent; // 退出时等待工作者结束事件
     
     FOnError: TWorkerErrorNotify;
     FOnCustomFreeData: TCustomFreeDataEvent;
@@ -669,9 +676,9 @@ type
     {$ENDIF}
     function GetEnabled: Boolean;
     function PostWaitJob(AJob: PJob; ASignalId: Integer): TJobHandle;
-    function ClearSignalJobs(ASource: PJob): Integer;
+    function ClearSignalJobs(ASource: PJob; AWaitRunningDone: Boolean = True): Integer;
     function ClearJobs(AObject: Pointer; AProc: TJobProc; AData: Pointer; AMaxTimes: Integer): Integer;
-    function ClearWaitJobs(ASignalId: Integer; const ASignalName: string): Integer;
+    function ClearWaitJobs(ASignalId: Integer; const ASignalName: string; AWaitRunningDone: Boolean): Integer;
     procedure SetEnabled(const Value: Boolean);
     procedure SetMaxLongtimeWorkers(const Value: Integer);
     procedure SetMaxWorkers(const Value: Integer);
@@ -694,7 +701,7 @@ type
     function SignalIdByName(const AName: string): Integer;
     procedure SignalWorkDone(AJob: PJob; AUsedTime: Int64);
     procedure WorkerTerminate(AWorker: TYXDWorker);
-    procedure WaitRunningDone(const AParam: TWorkerWaitParam);
+    procedure WaitRunningDone(const AParam: TWorkerWaitParam; AMarkTerminateOnly: Boolean);
     procedure FireSignalJob(ASignal: PSignal; AData: Pointer; AFreeType: TJobDataFreeType);
     procedure DoJobFree(ATable: TObject; AHash: THashType; AData: Pointer);
     procedure DoCustomFreeData(AFreeType: TJobDataFreeType; var AData: Pointer);
@@ -721,32 +728,32 @@ type
     {$ENDIF}
     
     // 清除所有作业
-    procedure Clear; overload;
+    procedure Clear(AWaitRunningDone: Boolean = True); overload;
     /// <summary>清除一个对象相关的所有作业</summary>
     /// <param name="AObject">要释放的作业处理过程关联对象</param>
     /// <param name="AMaxTimes">最多清除的数量，如果<0，则全清</param>
     /// <returns>返回实际清除的作业数量</returns>
     /// <remarks>一个对象如果计划了作业，则在自己释放前应调用本函数以清除关联的作业，
     /// 否则，未完成的作业可能会触发异常。</remarks>
-    function Clear(AObject: Pointer; AMaxTimes: Integer = -1): Integer; overload;
+    function Clear(AObject: Pointer; AMaxTimes: Integer = -1; AWaitRunningDone: Boolean = True): Integer; overload;
     /// <summary>清除所有投寄的指定过程作业</summary>
     /// <param name="AProc">要清除的作业执行过程</param>
     /// <param name="AData">要清除的作业附加数据指针地址，如果值为nil，
     /// 则清除所有的相关过程，否则，只清除附加数据地址一致的过程</param>
     /// <param name="AMaxTimes">最多清除的数量，如果<0，则全清</param>
     /// <returns>返回实际清除的作业数量</returns>
-    function Clear(AProc: TJobProc; AData: Pointer; AMaxTimes: Integer = -1): Integer; overload;
+    function Clear(AProc: TJobProc; AData: Pointer; AMaxTimes: Integer = -1; AWaitRunningDone: Boolean = True): Integer; overload;
     /// <summary>清除指定信号关联的所有作业</summary>
     /// <param name="ASingalId">要清除的信号名称</param>
     /// <returns>返回实际清除的作业数量</returns>
-    function Clear(const ASignalName: string): Integer; overload;
+    function Clear(const ASignalName: string; AWaitRunningDone: Boolean = True): Integer; overload;
     /// <summary>清除指定信号关联的所有作业</summary>
     /// <param name="ASingalId">要清除的信号ID</param>
     /// <returns>返回实际清除的作业数量</returns>
-    function Clear(ASignalId: Integer): Integer; overload;
+    function Clear(ASignalId: Integer; AWaitRunningDone: Boolean = True): Integer; overload;
     /// <summary>清除指定句柄对应的作业</summary>
     /// <param name="AHandle">要清除的作业句柄</param>
-    procedure Clear(AHandle: TJobHandle); overload;
+    procedure Clear(AHandle: TJobHandle; AWaitRunningDone: Boolean = True); overload;
 
     /// <summary>投寄一个作业</summary>
     /// <param name="AJobProc">要定时执行的作业过程</param>
@@ -1158,6 +1165,7 @@ var
   ExDataMap: TIntHash;
   {$ENDIF}
   _CPUCount: Integer;
+  AppTerminated: Boolean;
   {$IFDEF NEXTGEN}
   _Watch: TStopWatch;
   {$ELSE}
@@ -1377,7 +1385,7 @@ begin
   {$ENDIF}
 end;
 
-procedure ProcessAppMessage;
+function ProcessAppMessage: Boolean;
 {$IFDEF MSWINDOWS}
 var
   AMsg: MSG;
@@ -1385,13 +1393,20 @@ var
 begin
   FillChar(AMsg, SizeOf(AMsg), 0);
   {$IFDEF MSWINDOWS}
+  Result := True;
   while PeekMessage(AMsg, 0, 0, 0, PM_REMOVE) do begin
     TranslateMessage(AMsg);
     DispatchMessage(AMsg);
+    if AMsg.message = WM_QUIT then
+      AppTerminated := True;
   end;
+  if AppTerminated then
+    PostQuitMessage(ExitCode);
   {$ELSE}
   Application.ProcessMessages;
+  AppTerminated := Application.Terminated;
   {$ENDIF}
+  Result := not AppTerminated;
 end;
 
 function MsgWaitForEvent(AEvent: TEvent; ATimeout: Cardinal): TWaitResult;
@@ -2346,6 +2361,57 @@ begin
   inherited;
 end;
 
+procedure TYXDWorker.ForceQuit();
+var
+  I: Integer;
+  AThread: TThread;
+begin
+  // 警告：此函数会强制结束当前工作者，当前工作者的作业实际上被强制停止，可能会产生内存泄露
+  AThread := Self;
+  if ThreadExists(AThread.ThreadId) then
+    AThread.Suspended := True;
+  AThread.Terminate;
+  TThread.Synchronize(nil, DoTerminate);
+  {$IFDEF MSWINDOWS}
+  TerminateThread(Handle, $FFFFFFFF);
+  {$ENDIF}
+  FOwner.WorkerTerminate(Self);
+  if Assigned(FActiveJob) then begin
+    AtomicDecrement(FOwner.FBusyCount);
+
+    if not IsCleaning then begin
+      // AfterExecute
+      Inc(FProcessed);
+      SetValue(WORKER_CLEANING, True);
+      FActiveJob.Worker := nil;
+      if not FActiveJob.Runonce then begin
+        FOwner.FRepeatJobs.AfterJobRun(FActiveJob, GetTimestamp - FActiveJob.StartTime);
+        FActiveJob.Data := nil;
+      end else begin
+        if FActiveJob.IsSignalWakeup then
+          FOwner.SignalWorkDone(FActiveJob, GetTimestamp - FActiveJob.StartTime)
+        else if FActiveJob.IsLongtimeJob then
+          AtomicDecrement(FOwner.FLongTimeWorkers)
+        else if FActiveJob.IsGrouped then
+          FActiveJobGroup.DoJobExecuted(FActiveJob);
+      end;
+
+      if Assigned(FActiveJob) then                       
+        FOwner.FreeJob(FActiveJob);
+      FActiveJobProc := nil;
+      FActiveJobSource := nil;
+      FActiveJobFlags := 0;
+      FActiveJobGroup := nil;
+      FTerminatingJob := nil;
+      FFlags := FFlags and (not WORKER_EXECUTING);
+      
+    end;
+    
+  end;
+  if FreeOnTerminate then
+    FreeAndNil(AThread);
+end;
+
 procedure TYXDWorker.DoJob(AJob: PJob);
 begin
   {$IFDEF SAVE_WORDER_TIME}
@@ -2382,7 +2448,7 @@ begin
     Result := FEvent.WaitFor(ATimeout);
     T := GetTimestamp - T;
     if Result = wrTimeout then begin
-      Inc(FTimeout, T div 10);
+      Inc(FTimeout, T);
       if AByRepeatJob then
         Result := wrSignaled;
     end;
@@ -2400,7 +2466,7 @@ begin
   {$IFDEF MSWINDOWS}
   SyncEvent := TEvent.Create(nil, False, False, '');
   {$IFDEF UNICODE}
-  NameThreadForDebugging('YXDWorker');
+  NameThreadForDebugging('YXDWorker.' + IntToStr(ThreadID));
   {$ENDIF}
   {$ENDIF}
   try
@@ -2557,14 +2623,14 @@ end;
 
 { TYXDWorkers }
 
-function TYXDWorkers.Clear(const ASignalName: string): Integer;
+function TYXDWorkers.Clear(const ASignalName: string; AWaitRunningDone: Boolean): Integer;
 begin
-  Result := ClearWaitJobs(0, ASignalName);
+  Result := ClearWaitJobs(0, ASignalName, AWaitRunningDone);
 end;
 
-function TYXDWorkers.Clear(ASignalId: Integer): Integer;
+function TYXDWorkers.Clear(ASignalId: Integer; AWaitRunningDone: Boolean): Integer;
 begin
-  Result := ClearWaitJobs(ASignalId, '');
+  Result := ClearWaitJobs(ASignalId, '', AWaitRunningDone);
 end;
 
 {$IFDEF USEINLINE}
@@ -2622,7 +2688,7 @@ begin
 end;
 {$ENDIF}
 
-procedure TYXDWorkers.Clear(AHandle: TJobHandle);
+procedure TYXDWorkers.Clear(AHandle: TJobHandle; AWaitRunningDone: Boolean);
 var
   AInstance: PJob;
   AWaitParam: TWorkerWaitParam;
@@ -2694,20 +2760,20 @@ begin
     AWaitParam.WaitType := 4
   else
     AWaitParam.WaitType := 2;
-  WaitRunningDone(AWaitParam);
+  WaitRunningDone(AWaitParam, not AWaitRunningDone);
 end;
 
-function TYXDWorkers.Clear(AProc: TJobProc; AData: Pointer; AMaxTimes: Integer): Integer;
+function TYXDWorkers.Clear(AProc: TJobProc; AData: Pointer; AMaxTimes: Integer; AWaitRunningDone: Boolean): Integer;
 begin
   Result := ClearJobs(nil, AProc, AData, AMaxTimes);
 end;
 
-function TYXDWorkers.Clear(AObject: Pointer; AMaxTimes: Integer): Integer;
+function TYXDWorkers.Clear(AObject: Pointer; AMaxTimes: Integer; AWaitRunningDone: Boolean): Integer;
 begin
   Result := ClearJobs(AObject, nil, nil, AMaxTimes);
 end;
 
-procedure TYXDWorkers.Clear;
+procedure TYXDWorkers.Clear(AWaitRunningDone: Boolean);
 var
   i: Integer;
   AParam: TWorkerWaitParam;
@@ -2730,7 +2796,7 @@ begin
       FLocker.Leave;
     end;
     AParam.WaitType := $FF;
-    WaitRunningDone(AParam);
+    WaitRunningDone(AParam, not AWaitRunningDone);
   finally
     EnableWorkers;
   end;
@@ -2811,14 +2877,14 @@ begin
             AWaitParam.Data := AData;
             AWaitParam.WorkerProc := TMethod(AProc);
           end;
-          WaitRunningDone(AWaitParam);
+          WaitRunningDone(AWaitParam, True);
         end;
       end;
     end;
   end;
 end;
 
-function TYXDWorkers.ClearWaitJobs(ASignalId: Integer; const ASignalName: string): Integer;
+function TYXDWorkers.ClearWaitJobs(ASignalId: Integer; const ASignalName: string; AWaitRunningDone: Boolean): Integer;
 var
   i: Integer;
   ASignal: PSignal;
@@ -2847,10 +2913,10 @@ begin
     FLocker.Leave;
   end;
   if AJob <> nil then
-    Result := ClearSignalJobs(AJob)
+    Result := ClearSignalJobs(AJob, AWaitRunningDone)
 end;
 
-function TYXDWorkers.ClearSignalJobs(ASource: PJob): Integer;
+function TYXDWorkers.ClearSignalJobs(ASource: PJob; AWaitRunningDone: Boolean): Integer;
 var
   ACount: Integer;
   AFirst, ALast, APrior, ANext: PJob;
@@ -2902,7 +2968,7 @@ begin
   end;
   AWaitParam.WaitType := 2;
   AWaitParam.SourceJob := ASource;
-  WaitRunningDone(AWaitParam);
+  WaitRunningDone(AWaitParam, not AWaitRunningDone);
   FreeJob(ASource);
 end;
 
@@ -2910,6 +2976,45 @@ procedure TYXDWorkers.ClearWorkers();
 var
   i: Integer;
   AInMainThread: Boolean;
+
+  procedure SetEvents;
+  var
+    I, C: Integer;
+  begin
+    C := 0;
+    FLocker.Enter;
+    try
+      FRepeatJobs.FFirstFireTime := 0;
+      for I := 0 to FWorkerCount - 1 do begin
+        if ThreadExists(FWorkers[I].ThreadId) then
+        // 在 DLL 中，线程可能被 Windows 直接结束掉
+        begin
+          FWorkers[I].FEvent.SetEvent;
+          Inc(C);
+        end;
+      end;
+    finally
+      FLocker.Leave;
+      if C = 0 then
+        FTerminateEvent.SetEvent;
+    end;
+  end;
+
+  {$IFDEF MSWINDOWS}
+  procedure ProcessMainThreadJobs;
+  var
+    AMsg: MSG;
+    ACopy: TMessage;
+  begin
+    while PeekMessage(AMsg, FMainWorker, WM_APP, WM_APP, PM_REMOVE) do begin
+      ACopy.MSG := AMsg.message;
+      ACopy.WPARAM := AMsg.WPARAM;
+      ACopy.LPARAM := AMsg.LPARAM;
+      ACopy.Result := 0;
+      DoMainThreadWork(ACopy);
+    end;
+  end;
+  {$ENDIF}
 
   function WorkerExists: Boolean;
   var
@@ -2935,28 +3040,19 @@ var
   T: Int64;
 begin
   FTerminating := True;
-  FLocker.Enter;
-  try
-    FRepeatJobs.SetFirstFireTime(0);
-    for i := 0 to FWorkerCount - 1 do
-      FWorkers[i].FEvent.SetEvent;
-  finally
-    FLocker.Leave;
-  end;
-  AInMainThread := GetCurrentThreadId = MainThreadId;
-  T := GetTimestamp;
-  while (FWorkerCount > 0) and WorkerExists do begin
-    if AInMainThread then
-      ProcessAppMessage;
-    if GetTimestamp - T > 35000 then
-      Break;
-    Sleep(30);
-  end;
-  for i := 0 to FWorkerCount - 1 do begin
-    if FWorkers[i] <> nil then
-      FreeAndNil(FWorkers[i]);
-  end;
-  FWorkerCount := 0;
+  if not Assigned(FTerminateEvent) then
+    FTerminateEvent := TEvent.Create(nil, True, false, '');
+  SetEvents;
+  {$IFDEF MSWINDOWS}
+  repeat
+    ProcessMainThreadJobs;
+  until FTerminateEvent.WaitFor(10) = wrSignaled;
+  {$ELSE}
+  FTerminateEvent.WaitFor(INFINITE);
+  {$ENDIF}
+  FreeAndNil(FTerminateEvent);
+  while FWorkerCount > 0 do
+    FWorkers[0].ForceQuit;
 end;
 
 constructor TYXDWorkers.Create(AMinWorkers: Integer);
@@ -3205,7 +3301,7 @@ begin
       jdfFreeAsRecord:
         Dispose(AData);
       jdfFreeAsInterface:
-        IUnknown(AData)._Release
+        (IInterface(AData) as IInterface)._Release
     else
       DoCustomFreeData(AFreeType, AData);
     end;
@@ -3827,7 +3923,7 @@ begin
   end;
 end;
 
-procedure TYXDWorkers.WaitRunningDone(const AParam: TWorkerWaitParam);
+procedure TYXDWorkers.WaitRunningDone(const AParam: TWorkerWaitParam; AMarkTerminateOnly: Boolean);
 var
   AInMainThread: Boolean;
 
@@ -3847,30 +3943,39 @@ var
           //Continue;
         end else if FWorkers[i].IsExecuting then begin
           AJob := FWorkers[i].FActiveJob;
-          case AParam.WaitType of
-            0: // ByObject
-              Result := TMethod(FWorkers[i].FActiveJobProc).Data = AParam.Bound;
-            1: // ByData
-              Result := (TMethod(FWorkers[i].FActiveJobProc).Code = TMethod(AParam.WorkerProc).Code) and
-                (TMethod(FWorkers[i].FActiveJobProc).Data = TMethod(AParam.WorkerProc).Data) and
-                ((AParam.Data = nil) or (AParam.Data = Pointer(-1)) or
-                (FWorkers[i].FActiveJobData = AParam.Data));
-            2: // BySignalSource
-              Result := (FWorkers[i].FActiveJobSource = AParam.SourceJob);
-            3: // ByGroup
-              Result := (FWorkers[i].FActiveJobGroup = AParam.Group);
-            $FF: // 所有
-              Result := True;
-          else 
-            begin
-              if Assigned(FOnError) then
-                FOnError(AJob, Exception.CreateFmt(SBadWaitDoneParam, [AParam.WaitType]), jesWaitDone)
-              else
-                raise Exception.CreateFmt(SBadWaitDoneParam, [AParam.WaitType]);
+          if not FWorkers[I].IsCleaning then begin
+            case AParam.WaitType of
+              0: // ByObject
+                Result := TMethod(FWorkers[i].FActiveJobProc).Data = AParam.Bound;
+              1: // ByData
+                Result := (TMethod(FWorkers[i].FActiveJobProc).Code = TMethod(AParam.WorkerProc).Code) and
+                  (TMethod(FWorkers[i].FActiveJobProc).Data = TMethod(AParam.WorkerProc).Data) and
+                  ((AParam.Data = nil) or (AParam.Data = Pointer(-1)) or
+                  (FWorkers[i].FActiveJobData = AParam.Data));
+              2: // BySignalSource
+                Result := (FWorkers[i].FActiveJobSource = AParam.SourceJob);
+              3: // ByGroup
+                Result := (FWorkers[i].FActiveJobGroup = AParam.Group);
+              4: // ByJob
+                Result := (AJob = AParam.SourceJob);
+              $FF: // 所有
+                Result := True;
+            else 
+              begin
+                if Assigned(FOnError) then
+                  FOnError(AJob, Exception.CreateFmt(SBadWaitDoneParam, [AParam.WaitType]), jesWaitDone)
+                else
+                  raise Exception.CreateFmt(SBadWaitDoneParam, [AParam.WaitType]);
+              end;
             end;
-          end;
-          if Result then
-            FWorkers[i].FTerminatingJob := AJob;
+            if Result then begin
+              FWorkers[i].FTerminatingJob := AJob;
+              // 检查是否当前是主线程中停止主线程作业，如果是的话，是无法停止的，所以只是标记一下
+              if (not AMarkTerminateOnly) and AJob.InMainThread and (GetCurrentThreadId = MainThreadId) then
+                AMarkTerminateOnly := True;
+            end;
+          end else
+            Result := True;
         end;
       end;
     finally
@@ -3882,7 +3987,7 @@ var
 begin
   AInMainThread := GetCurrentThreadId = MainThreadId;
   while True do begin
-    if HasJobRunning then begin
+    if HasJobRunning and (not AMarkTerminateOnly) then begin
       if AInMainThread then
         // 如果是在主线程中清理，由于作业可能在主线程执行，可能已经投寄尚未执行，所以必需让其能够执行
         ProcessAppMessage;
@@ -3901,9 +4006,11 @@ begin
     Dec(FWorkerCount);
     if AWorker.IsFiring then
       AtomicDecrement(FFiringWorkerCount);
-    if FWorkerCount = 0 then
-      FWorkers[0] := nil
-    else begin
+    if FWorkerCount = 0 then begin
+      FWorkers[0] := nil;
+      if Assigned(FTerminateEvent) then
+        FTerminateEvent.SetEvent;
+    end else begin
       for i := 0 to FWorkerCount do begin
         if AWorker = FWorkers[i] then begin
           for J := i to FWorkerCount do
@@ -4054,7 +4161,7 @@ begin
     if AWaitRunningDone then begin
       AWaitParam.WaitType := 3;
       AWaitParam.Group := Self;
-      Workers.WaitRunningDone(AWaitParam);
+      Workers.WaitRunningDone(AWaitParam, False);
     end;
   end;
   if FPosted = 0 then begin
